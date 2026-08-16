@@ -25,7 +25,7 @@ export default function MicListener({ onAudioCaptured, disabled, language = "en"
   const analyserRef = useRef<AnalyserNode | null>(null);
   const timerIntervalRef = useRef<any>(null);
 
-  const RECORD_MAX_SECONDS = 12;
+  const RECORD_MAX_SECONDS = 15;
 
   // Cleanup on unmount
   useEffect(() => {
@@ -56,9 +56,12 @@ export default function MicListener({ onAudioCaptured, disabled, language = "en"
   const getAudioStream = async (): Promise<MediaStream> => {
     const constraints: MediaStreamConstraints = {
       audio: {
-        echoCancellation: true,
+        // Disable voice-specific DSP filters so raw music audio & full frequency spectrum are captured without chopping
+        echoCancellation: false,
         noiseSuppression: false,
-        autoGainControl: true,
+        autoGainControl: false,
+        channelCount: { ideal: 2 },
+        sampleRate: { ideal: 48000 },
       },
     };
 
@@ -184,7 +187,8 @@ export default function MicListener({ onAudioCaptured, disabled, language = "en"
         };
       };
 
-      mediaRecorder.start(250); // collect 250ms chunks
+      // Continuous recording without timeslice gaps to ensure clean audio recording
+      mediaRecorder.start();
       setIsRecording(true);
 
       // Start timer
