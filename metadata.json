@@ -1,0 +1,8 @@
+{
+  "name": "Music Lyric & BPM Analyzer",
+  "description": "Upload or listen to music via microphone to transcribe lyrics in Suno.ai format and analyze its BPM, style, singers, genre, tags, estimated age, and nationality.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
