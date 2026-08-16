@@ -73,6 +73,12 @@ Into the grid...
         }
       ],
       genres: ["Synthwave", "Retrowave", "Electronic"],
+      instruments: [
+        { name: "Sintetizador Analógico (Lead & Pads)", percentage: 45 },
+        { name: "Bateria Eletrônica (Drum Machine 80s)", percentage: 30 },
+        { name: "Sintetizador de Baixo (Bass Synth)", percentage: 15 },
+        { name: "Vocoder / Efeitos Vocais", percentage: 10 }
+      ],
       tags: ["analog synthesizer", "4/4 beat", "drum machine", "high-tempo", "glowing vibe", "80s nostalgia"],
       similarSongs: [
         { name: "Midnight City by M83", similarity: 88 },
@@ -157,6 +163,12 @@ Just whispers...
         }
       ],
       genres: ["Indie Folk", "Acoustic", "Singer-Songwriter"],
+      instruments: [
+        { name: "Violão Acústico (Fingerpicking)", percentage: 50 },
+        { name: "Violino / Cordas Orquestrais Suaves", percentage: 25 },
+        { name: "Piano Acústico de Cauda", percentage: 15 },
+        { name: "Percussão Orgânica (Shaker & Tambor)", percentage: 10 }
+      ],
       tags: ["acoustic guitar", "violin", "rain effects", "emotional", "slow tempo", "cozy", "autumn vibes"],
       similarSongs: [
         { name: "Skinny Love by Bon Iver", similarity: 92 },
@@ -242,6 +254,12 @@ We are the rebels!
         }
       ],
       genres: ["Hard Rock", "Alternative Rock", "Grunge"],
+      instruments: [
+        { name: "Guitarra Elétrica Distorcida (Rhythm & Lead Solo)", percentage: 45 },
+        { name: "Bateria Acústica Rock (Double Bass Drum)", percentage: 30 },
+        { name: "Baixo Elétrico com Overdrive", percentage: 15 },
+        { name: "Vocais Principais / Gang Vocals", percentage: 10 }
+      ],
       tags: ["distorted guitar", "heavy drums", "blistering solo", "energetic", "rebellious", "high volume"],
       similarSongs: [
         { name: "Kryptonite by 3 Doors Down", similarity: 87 },

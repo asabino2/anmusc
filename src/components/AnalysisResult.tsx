@@ -1,16 +1,27 @@
 import { useState } from "react";
 import { MusicAnalysis } from "../types";
 import { motion } from "motion/react";
-import { Copy, Check, Download, Music, Flame, User, Radio, Tag, Info, Sparkles, ListMusic, Globe, Calendar } from "lucide-react";
+import { Copy, Check, Download, Music, Flame, User, Radio, Tag, Info, Sparkles, ListMusic, Globe, Calendar, Sliders } from "lucide-react";
+import { SupportedLanguage, TRANSLATIONS } from "../i18n/translations";
+import AudioPlayerBar from "./AudioPlayerBar";
 
 interface AnalysisResultProps {
   analysis: MusicAnalysis;
   songTitle?: string;
   songArtist?: string;
+  audioUrl?: string | null;
+  language?: SupportedLanguage;
 }
 
-export default function AnalysisResult({ analysis, songTitle, songArtist }: AnalysisResultProps) {
+export default function AnalysisResult({
+  analysis,
+  songTitle,
+  songArtist,
+  audioUrl,
+  language = "en",
+}: AnalysisResultProps) {
   const [copied, setCopied] = useState(false);
+  const t = TRANSLATIONS[language] || TRANSLATIONS.en;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(analysis.lyrics);
@@ -56,281 +67,249 @@ export default function AnalysisResult({ analysis, songTitle, songArtist }: Anal
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      className="grid grid-cols-1 lg:grid-cols-12 gap-8 w-full"
+      className="space-y-6 w-full"
     >
-      {/* Left Column: Lyrics Sheet */}
-      <div className="lg:col-span-7 glass-card rounded-3xl p-6 md:p-8 flex flex-col h-[600px] shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500/80 via-purple-500/80 to-pink-500/80"></div>
-        
-        <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
-          <div>
-            <h3 className="font-sans font-bold text-base md:text-lg text-white flex items-center gap-2 tracking-tight">
-              <Music className="w-5 h-5 text-[#88aaff]" />
-              Letra Formatada (Suno.ai)
-            </h3>
-            <p className="text-[10px] uppercase tracking-widest text-white/50 mt-1">Estrutura de seções gerada com IA</p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleCopy}
-              className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all text-xs flex items-center gap-1.5 border border-white/10"
-              title="Copiar letra"
-            >
-              {copied ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Copiado!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copiar</span>
-                </>
-              )}
-            </button>
-            <button
-              onClick={handleDownload}
-              className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all text-xs flex items-center gap-1.5 border border-white/10"
-              title="Baixar TXT"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Baixar</span>
-            </button>
-          </div>
-        </div>
+      {/* Audio Player Bar at the top of results */}
+      {audioUrl && (
+        <AudioPlayerBar
+          audioUrl={audioUrl}
+          title={analysis.songName || songTitle || "Áudio Carregado"}
+          subtitle={songArtist || (analysis.songIdentificationType === "recognized" ? "Música Reconhecida" : "Análise em Reprodução")}
+        />
+      )}
 
-        {/* Scrollable Lyrics Container */}
-        <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-2 lyric-scroll font-sans">
-          {renderedLyrics}
-        </div>
-      </div>
-
-      {/* Right Column: Music Metadata Grid (Bento) */}
-      <div className="lg:col-span-5 flex flex-col gap-6">
-        {/* Track Title Card */}
-        <div className="glass-card rounded-3xl p-6 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-[#88aaff]/10 to-transparent rounded-bl-full pointer-events-none"></div>
-          <div className="flex items-center gap-2 border-b border-white/10 pb-3 mb-4">
-            <Sparkles className="w-4 h-4 text-[#88aaff]" />
-            <h4 className="text-xs uppercase tracking-widest font-semibold text-white/50">Nome Identificado / Estimado</h4>
-          </div>
-          <h3 className="text-xl md:text-2xl font-black text-white tracking-tight accent-glow-text">
-            {analysis.songName || "Música Desconhecida"}
-          </h3>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 w-full">
+        {/* Left Column: Lyrics Sheet */}
+        <div className="lg:col-span-7 glass-card rounded-3xl p-6 md:p-8 flex flex-col h-[600px] shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500/80 via-purple-500/80 to-pink-500/80"></div>
           
-          <div className="flex flex-wrap gap-2 items-center mt-3">
-            {analysis.songIdentificationType === "recognized" ? (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-                <Check className="w-3 h-3" />
-                Nome Real Reconhecido
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/20 text-amber-400">
-                <Sparkles className="w-3 h-3" />
-                Estimativa da IA
-              </span>
-            )}
-          </div>
-
-          <p className="text-xs text-white/50 mt-3.5 leading-relaxed">
-            Nome real oficial reconhecido no banco de dados de áudio comercial ou uma estimativa inteligente baseada na letra, voz e harmonia da faixa.
-          </p>
-        </div>
-
-        {/* Dynamic BPM Card */}
-        <div className="glass-card rounded-3xl p-6 shadow-xl relative overflow-hidden flex items-center justify-between">
-          <div>
-            <div className="text-[10px] uppercase tracking-wider font-semibold text-white/50">BPM / ANDAMENTO</div>
-            <h4 className="text-4xl font-mono font-black mt-2 flex items-baseline gap-2 accent-glow-text">
-              {analysis.bpm} <span className="text-xs font-sans text-white/40 font-semibold tracking-wider uppercase">BPM</span>
-            </h4>
-            <p className="text-xs text-white/50 mt-1.5">Batidas por minuto detectadas no áudio</p>
-          </div>
-          
-          <div className="flex flex-col items-center gap-2 pr-2">
-            <div className="relative flex items-center justify-center w-14 h-14">
-              {/* Outer pulsing ring */}
-              <motion.div
-                animate={{ scale: [1, 1.8, 1], opacity: [0.6, 0, 0.6] }}
-                transition={{
-                  duration: pulseDuration,
-                  repeat: Infinity,
-                  ease: "easeInOut"
-                }}
-                className="absolute w-10 h-10 rounded-full bg-[#88aaff]/15"
-              />
-              {/* Inner solid pulsing beat */}
-              <motion.div
-                animate={{ scale: [1, 1.2, 1] }}
-                transition={{
-                  duration: pulseDuration,
-                  repeat: Infinity,
-                  ease: "easeInOut"
-                }}
-                className="w-8 h-8 rounded-full bg-[#88aaff] shadow-[0_0_15px_rgba(136,170,255,0.6)] flex items-center justify-center"
+          <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
+            <div>
+              <h3 className="font-sans font-bold text-base md:text-lg text-white flex items-center gap-2 tracking-tight">
+                <Music className="w-5 h-5 text-[#88aaff]" />
+                {t.lyricsTitle}
+              </h3>
+              <p className="text-[10px] uppercase tracking-widest text-white/50 mt-1">{t.lyricsSub}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleCopy}
+                className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all text-xs flex items-center gap-1.5 border border-white/10 cursor-pointer"
+                title={t.copyBtn}
               >
-                <Flame className="w-4 h-4 text-zinc-950" />
-              </motion.div>
+                {copied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>{t.copiedBtn}</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>{t.copyBtn}</span>
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleDownload}
+                className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all text-xs flex items-center gap-1.5 border border-white/10 cursor-pointer"
+                title={t.downloadBtn}
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>{t.downloadBtn}</span>
+              </button>
             </div>
+          </div>
+
+          {/* Scrollable lyrics area */}
+          <div className="flex-1 overflow-y-auto pr-3 space-y-1 custom-scrollbar">
+            {renderedLyrics}
           </div>
         </div>
 
-        {/* Similar Songs Card */}
-        {analysis.similarSongs && analysis.similarSongs.length > 0 && (
-          <div className="glass-card rounded-3xl p-6 shadow-xl">
-            <div className="flex items-center gap-2 border-b border-white/10 pb-3 mb-4">
-              <ListMusic className="w-4 h-4 text-[#88aaff]" />
-              <h4 className="text-xs uppercase tracking-widest font-semibold text-white/50">Músicas Similares</h4>
-            </div>
-            <div className="flex flex-col gap-3.5">
-              {analysis.similarSongs.map((song, i) => (
-                <div key={i} className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/[0.04] flex flex-col gap-2 hover:bg-white/[0.04] transition-all">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs md:text-sm font-bold text-white/90 truncate pr-2">
-                      {song.name}
-                    </span>
-                    <span className="text-[10px] font-mono font-bold text-[#88aaff] shrink-0 bg-[#88aaff]/10 px-2.5 py-0.5 rounded-full border border-[#88aaff]/15">
-                      {song.similarity}% similar
-                    </span>
-                  </div>
-                  {/* Progress bar representing similarity */}
-                  <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-indigo-500 to-[#88aaff] rounded-full"
-                      style={{ width: `${song.similarity}%` }}
+        {/* Right Column: Audio Analysis Dashboard */}
+        <div className="lg:col-span-5 flex flex-col gap-6">
+          
+          {/* Song Name, Cover Art & Identification Status Card */}
+          {analysis.songName && (
+            <div className="glass-card rounded-3xl p-6 border border-white/10 relative overflow-hidden shadow-xl bg-gradient-to-br from-indigo-950/30 via-black/50 to-black/80 space-y-4">
+              <div className="flex justify-between items-start">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-white/50 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-[#88aaff]" />
+                  {analysis.songIdentificationType === "recognized" ? "RECOGNIZED TRACK" : "AI ESTIMATED TITLE"}
+                </span>
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
+                  analysis.songIdentificationType === "recognized"
+                    ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
+                    : "bg-indigo-500/10 text-indigo-300 border-indigo-500/30"
+                }`}>
+                  {analysis.songIdentificationType === "recognized" ? "Match Recognized" : "AI Vibe Estimate"}
+                </span>
+              </div>
+
+              <div className="flex gap-4 items-center">
+                {analysis.albumCoverUrl && (
+                  <div className="relative shrink-0 group">
+                    <img
+                      src={analysis.albumCoverUrl}
+                      alt={analysis.songName}
+                      className="w-20 h-20 md:w-24 md:h-24 rounded-2xl object-cover border border-white/20 shadow-2xl transition-transform duration-300 group-hover:scale-105"
                     />
+                    <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/10"></div>
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-xl md:text-2xl font-black text-white tracking-tight leading-tight">
+                    {analysis.songName}
+                  </h2>
+                  {analysis.albumName && (
+                    <p className="text-xs text-[#88aaff] font-semibold mt-1">
+                      Álbum: {analysis.albumName} {analysis.releaseYear ? `(${analysis.releaseYear})` : ""}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* BPM Card */}
+          <div className="glass-card rounded-3xl p-6 border border-white/10 flex items-center justify-between shadow-xl relative overflow-hidden">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center relative">
+                <motion.div
+                  animate={{ scale: [1, 1.15, 1] }}
+                  transition={{ duration: pulseDuration, repeat: Infinity, ease: "easeInOut" }}
+                  className="w-5 h-5 rounded-full bg-indigo-400/80 shadow-[0_0_15px_rgba(129,140,248,0.8)]"
+                ></motion.div>
+              </div>
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-widest text-white/50 flex items-center gap-1">
+                  <Flame className="w-3 h-3 text-indigo-400" />
+                  {t.bpmTitle}
+                </div>
+                <div className="text-3xl font-black text-white tracking-tight flex items-baseline gap-2 mt-0.5">
+                  <span>{analysis.bpm}</span>
+                  <span className="text-xs text-white/40 font-mono">BPM</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Vocalists & Singers Info Card with Photos */}
+          <div className="glass-card rounded-3xl p-6 border border-white/10 shadow-xl space-y-4">
+            <h4 className="text-xs font-mono uppercase tracking-widest text-white/50 flex items-center gap-2">
+              <User className="w-3.5 h-3.5 text-[#88aaff]" />
+              {t.singersTitle}
+            </h4>
+            <div className="space-y-3">
+              {analysis.singers.map((singer, idx) => (
+                <div key={idx} className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/[0.05] flex items-center gap-3">
+                  {singer.photoUrl && (
+                    <img
+                      src={singer.photoUrl}
+                      alt={singer.name}
+                      className="w-11 h-11 rounded-full object-cover border border-white/20 shadow-md shrink-0"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-bold text-white tracking-tight truncate">{singer.name}</span>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-white/70 shrink-0">
+                        {singer.gender}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-4 text-xs text-white/60 font-medium pt-1 border-t border-white/[0.04] mt-1">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3 text-indigo-400" />
+                        {singer.estimatedAge}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Globe className="w-3 h-3 text-indigo-400" />
+                        {singer.estimatedNationality}
+                      </span>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        )}
 
-        {/* Singers & Vocal Profile Card */}
-        <div className="glass-card rounded-3xl p-6 shadow-xl">
-          <div className="flex items-center gap-2 border-b border-white/10 pb-3 mb-4">
-            <User className="w-4 h-4 text-[#88aaff]" />
-            <h4 className="text-xs uppercase tracking-widest font-semibold text-white/50">CANTORAS / VOCALISTAS</h4>
+          {/* Genres & Styles */}
+          <div className="glass-card rounded-3xl p-6 border border-white/10 shadow-xl space-y-3">
+            <h4 className="text-xs font-mono uppercase tracking-widest text-white/50 flex items-center gap-2">
+              <Radio className="w-3.5 h-3.5 text-purple-400" />
+              {t.genresTitle}
+            </h4>
+            <div className="flex flex-wrap gap-2">
+              {analysis.genres.map((g, idx) => (
+                <span key={idx} className="px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-semibold">
+                  {g}
+                </span>
+              ))}
+              {analysis.styles.map((s, idx) => (
+                <span key={idx} className="px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-semibold">
+                  {s}
+                </span>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-col gap-3">
-            {analysis.singers && analysis.singers.length > 0 ? (
-              analysis.singers.map((singerItem, i) => {
-                const isObj = typeof singerItem === "object" && singerItem !== null;
-                const name = isObj ? singerItem.name : String(singerItem);
-                const gender = isObj ? singerItem.gender : null;
-                const age = isObj ? singerItem.estimatedAge : null;
-                const nationality = isObj ? singerItem.estimatedNationality : null;
 
-                return (
-                  <div
-                    key={i}
-                    className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex flex-col gap-2.5 hover:bg-white/[0.05] transition-all"
-                  >
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#88aaff] shadow-[0_0_8px_rgba(136,170,255,0.8)] shrink-0"></span>
-                        <span className="text-sm font-bold text-white tracking-tight">{name}</span>
-                      </div>
-                      {gender && (
-                        <span className="text-[10px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-white/70">
-                          {gender}
-                        </span>
-                      )}
+          {/* Detected Musical Instruments (With Percentages) */}
+          {analysis.instruments && analysis.instruments.length > 0 && (
+            <div className="glass-card rounded-3xl p-6 border border-white/10 shadow-xl space-y-4">
+              <h4 className="text-xs font-mono uppercase tracking-widest text-white/50 flex items-center gap-2">
+                <Sliders className="w-3.5 h-3.5 text-[#88aaff]" />
+                {t.instrumentsTitle || "Instrumentos Detectados"}
+              </h4>
+              <div className="space-y-3">
+                {analysis.instruments.map((inst, idx) => (
+                  <div key={idx} className="space-y-1.5">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-white/90 font-medium">{inst.name}</span>
+                      <span className="font-mono font-bold text-[#88aaff]">{inst.percentage}%</span>
                     </div>
-
-                    {(age || nationality) && (
-                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/5 text-xs">
-                        {age && (
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[#88aaff]/10 border border-[#88aaff]/20 text-[#88aaff] text-[11px] font-medium">
-                            <Calendar className="w-3 h-3 shrink-0" />
-                            <span>Idade Est.: <strong className="text-white">{age}</strong></span>
-                          </div>
-                        )}
-                        {nationality && (
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-300 text-[11px] font-medium">
-                            <Globe className="w-3 h-3 shrink-0" />
-                            <span>Nacionalidade: <strong className="text-white">{nationality}</strong></span>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden border border-white/10">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${Math.min(100, Math.max(0, inst.percentage))}%` }}
+                        transition={{ duration: 0.8, delay: idx * 0.1 }}
+                        className="h-full bg-gradient-to-r from-[#88aaff] via-indigo-500 to-purple-500 rounded-full"
+                      />
+                    </div>
                   </div>
-                );
-              })
-            ) : (
-              <span className="text-xs text-white/40 italic">Nenhum vocal detectado (Instrumental)</span>
-            )}
-          </div>
-        </div>
-
-        {/* Genres & Styles Card */}
-        <div className="glass-card rounded-3xl p-6 shadow-xl flex flex-col gap-5">
-          <div>
-            <div className="flex items-center gap-2 border-b border-white/10 pb-3 mb-4">
-              <Radio className="w-4 h-4 text-[#88aaff]" />
-              <h4 className="text-xs uppercase tracking-widest font-semibold text-white/50">GÊNERO & ESTILO</h4>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <span className="text-[9px] uppercase tracking-widest text-white/40 font-mono">GÊNEROS PRINCIPAIS</span>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {analysis.genres.map((genre, i) => (
-                    <span
-                      key={i}
-                      className="px-3 py-1.5 rounded-full bg-[#88aaff]/10 border border-[#88aaff]/25 text-xs text-[#88aaff] font-semibold uppercase tracking-wider"
-                    >
-                      {genre}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <span className="text-[9px] uppercase tracking-widest text-white/40 font-mono">PERFIL DE ESTILO / MOODS</span>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {analysis.styles.map((style, i) => (
-                    <span
-                      key={i}
-                      className="px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.08] text-xs text-white/80"
-                    >
-                      {style}
-                    </span>
-                  ))}
-                </div>
+                ))}
               </div>
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* Tags Cloud Card */}
-        <div className="glass-card rounded-3xl p-6 shadow-xl">
-          <div className="flex items-center gap-2 border-b border-white/10 pb-3 mb-4">
-            <Tag className="w-4 h-4 text-pink-400" />
-            <h4 className="text-xs uppercase tracking-widest font-semibold text-white/50">TAGS DE PRODUÇÃO</h4>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {analysis.tags.map((tag, i) => (
-              <span
-                key={i}
-                className="px-3 py-1 rounded-xl text-[11px] font-mono bg-white/[0.02] border border-white/[0.06] text-white/60 hover:text-[#88aaff] hover:border-[#88aaff]/30 transition-all cursor-default"
-              >
-                #{tag.toUpperCase().replace(/\s+/g, "")}
-              </span>
-            ))}
-          </div>
-        </div>
+          {/* Similar Songs */}
+          {analysis.similarSongs && analysis.similarSongs.length > 0 && (
+            <div className="glass-card rounded-3xl p-6 border border-white/10 shadow-xl space-y-3">
+              <h4 className="text-xs font-mono uppercase tracking-widest text-white/50 flex items-center gap-2">
+                <ListMusic className="w-3.5 h-3.5 text-pink-400" />
+                {t.similarSongsTitle}
+              </h4>
+              <div className="space-y-2">
+                {analysis.similarSongs.map((sim, idx) => (
+                  <div key={idx} className="flex justify-between items-center p-3 rounded-2xl bg-white/[0.02] border border-white/[0.05] text-xs">
+                    <span className="text-white/90 font-medium">{sim.name}</span>
+                    <span className="font-mono font-bold text-pink-400">{sim.similarity}% match</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-        {/* AI Summary Card */}
-        <div className="glass-card rounded-3xl p-6 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-[#88aaff]/10 to-transparent rounded-bl-full pointer-events-none"></div>
-          <div className="flex items-center gap-2 border-b border-white/10 pb-3 mb-4">
-            <Info className="w-4 h-4 text-emerald-400" />
-            <h4 className="text-xs uppercase tracking-widest font-semibold text-white/50">RESUMO DA ANALISE</h4>
+          {/* Summary Card */}
+          <div className="glass-card rounded-3xl p-6 border border-white/10 shadow-xl space-y-2 bg-white/[0.01]">
+            <h4 className="text-xs font-mono uppercase tracking-widest text-white/50 flex items-center gap-2">
+              <Info className="w-3.5 h-3.5 text-blue-400" />
+              {t.summaryTitle}
+            </h4>
+            <p className="text-xs text-white/70 leading-relaxed italic">
+              "{analysis.summary}"
+            </p>
           </div>
-          <p className="text-xs md:text-sm text-white/80 leading-relaxed italic font-serif">
-            "{analysis.summary}"
-          </p>
+
         </div>
       </div>
     </motion.div>

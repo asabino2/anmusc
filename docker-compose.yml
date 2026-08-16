@@ -1,0 +1,12 @@
+services:
+  suno-analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: suno_analyzer_app
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+    restart: unless-stopped

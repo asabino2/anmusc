@@ -1,40 +1,115 @@
-# Suno.ai Music Lyric & BPM Analyzer
+# 🎵 Suno.ai Music Lyric, BPM & Instrument Analyzer
 
-Aplicativo de análise de áudio inteligente powered by Google Gemini. Transcreve letras no padrão estrutural do **Suno.ai** (`[Verse]`, `[Chorus]`, etc.), calcula o BPM exato, identifica cantores (idade e nacionalidade estimada), gêneros, estilos, tags e oferece sugestões de músicas similares.
+An intelligent, state-of-the-art music analysis web application powered by **Google Gemini** (Cloud) and **Ollama** (Local Server).
+
+Transcribes audio into structured **Suno.ai** section tags (`[Verse]`, `[Chorus]`, `[Guitar Solo]`, `[Bridge]`, etc.), detects precise BPM, identifies real songs Shazam-style (with official HD album cover art), displays vocalist profiles with photos, breaks down musical instruments with percentage shares, and renders a built-in audio player.
 
 ---
 
-## 🚀 Como Instalar e Executar
+## ✨ Key Features
+
+- 🎧 **Audio Player Bar**: Built-in glassmorphism audio player for MP3 uploads, live microphone captures, and analysis result preview.
+- 🎯 **Shazam-Style Commercial Song Recognition**: Identifies real commercial tracks and retrieves official high-resolution album cover art (600x600 HD), album title, and release year via iTunes API.
+- 👤 **Singer & Vocalist Profiles with Photos**: Displays vocalists' real names, gender, estimated age, nationality, and avatar photos.
+- 🎸 **Detected Musical Instruments with Percentages**: Visual progress bars displaying the arrangement breakdown and percentage share of each instrument detected in the audio mix.
+- 🎤 **Live Microphone Recording**: Capture audio live from desktop or mobile devices (iOS Safari & Android Chrome compatible).
+- 🌐 **10-Language i18n System**: Full interface & AI analysis support in 10 languages.
+- 🤖 **Dual AI Providers (Gemini & Ollama)**: Choose between Google Gemini Cloud (`Gemini 3.6 Flash`, `Gemini 3.7 Flash`) or a local Ollama server (`http://localhost:11434`).
+- 🐳 **Docker Multi-Stage Alpine Build**: Clones repository directly from GitHub `https://github.com/asabino2/anmusc.git`.
+- 💻 **Cross-Platform Scripts**: Windows (`.bat` / `.ps1`) and Linux/macOS (`.sh`) automated installation & startup scripts.
+
+---
+
+## 🌐 Supported Languages (i18n)
+
+Both the web interface and the AI analysis output support 10 languages:
+
+- 🇺🇸 **English** (`en`)
+- 🇧🇷 **Portuguese** (`pt`)
+- 🇪🇸 **Spanish** (`es`)
+- 🇮🇹 **Italian** (`it`)
+- 🇷🇺 **Russian** (`ru`)
+- 🇨🇳 **Chinese** (`zh`)
+- 🇹🇷 **Turkish** (`tr`)
+- 🇵🇱 **Polish** (`pl`)
+- 🇩🇪 **German** (`de`)
+- 🇫🇷 **French** (`fr`)
+
+Change the language anytime inside the **Settings** modal.
+
+---
+
+## 🐳 Docker Deployment (Recommended)
+
+This project features a multi-stage Docker build based on **Alpine Linux** (`node:22-alpine`) that clones the latest repository code from `https://github.com/asabino2/anmusc.git`.
+
+### Using Docker Compose:
+```bash
+docker compose up -d --build
+```
+Access in your browser: `http://localhost:3000`
+
+### Using Docker CLI:
+```bash
+# 1. Build Docker image
+docker build -t suno-analyzer:latest .
+
+# 2. Run container
+docker run -d -p 3000:3000 --name suno_analyzer_app suno-analyzer:latest
+```
+
+---
+
+## 🚀 Local Installation & Execution (Without Docker)
 
 ### Windows
-Você pode usar o Prompt de Comando (cmd) ou o PowerShell:
-
-- **Instalação:**
-  - Clique duas vezes em `install.bat` **OU** execute no PowerShell: `.\install.ps1`
-- **Execução:**
-  - Clique duas vezes em `start.bat` **OU** execute no PowerShell: `.\start.ps1`
+- **Installation**: Double-click `install.bat` **OR** run in PowerShell: `.\install.ps1`
+- **Execution**: Double-click `start.bat` **OR** run in PowerShell: `.\start.ps1`
 
 ### Linux / macOS
-No terminal, execute os scripts Bash:
+```bash
+chmod +x install.sh start.sh
 
-- **Instalação:**
-  ```bash
-  chmod +x install.sh start.sh
-  ./install.sh
-  ```
-- **Execução:**
-  ```bash
-  ./start.sh
-  ```
+# 1. Install dependencies
+./install.sh
+
+# 2. Start application
+./start.sh
+```
 
 ---
 
-## 🔑 Configuração da Chave API do Google Gemini
+## 📱 Smartphone & Mobile Access (Microphone Permissions)
 
-O aplicativo **requer uma chave API do Google Gemini** para funcionar (não há chave embutida ou hardcoded).
+Mobile browsers (iOS Safari & Android Chrome) require a **Secure Context (HTTPS or localhost)** to allow microphone access.
 
-1. Abra o aplicativo no navegador em `http://localhost:3000`.
-2. Clique no botão **Settings** (com o ícone de engrenagem) no canto superior direito do cabeçalho.
-3. Cole sua Chave API do Gemini (obtenha gratuitamente no [Google AI Studio](https://aistudio.google.com/app/apikey)).
-4. Clique em **Testar Chave** para verificar se está funcionando e depois em **Salvar Chave**.
-5. A chave será salva no seu navegador (`localStorage`) e no servidor local, habilitando todas as funções de análise.
+### Accessing via local network (LAN) on mobile:
+To use the live microphone on a smartphone connected to your local Wi-Fi:
+
+1. **Option A: Free HTTPS Tunnel (Recommended)**:
+   ```bash
+   npx cloudflared tunnel --url http://localhost:3000
+   ```
+   Open the generated `https://xxxx.trycloudflare.com` link on your phone. Microphone permissions will work seamlessly!
+
+2. **Option B: Chrome Flags (Android)**:
+   - On Android Chrome, navigate to: `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
+   - Add your PC's IP address (e.g. `http://192.168.1.50:3000`), enable the flag, and restart Chrome.
+
+---
+
+## 🔑 AI Provider & Settings Setup
+
+1. Open `http://localhost:3000` in your browser.
+2. Click the **Settings** button (gear icon) in the header.
+3. Select your AI Provider:
+   - **Google Gemini**: Input your Gemini API Key (free from [Google AI Studio](https://aistudio.google.com/app/apikey)) and pick a model (`Gemini 3.6 Flash` or `Gemini 3.7 Flash`).
+   - **Ollama**: Input your Ollama Server URL (`http://localhost:11434`), click **Check Ollama**, and pick an installed audio model.
+4. Select your preferred **Language**.
+5. Click **Save**.
+
+---
+
+## 📄 License
+
+MIT License. Open source and free for personal and commercial use.

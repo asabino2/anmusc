@@ -27,23 +27,121 @@ const getGeminiClient = (customKey?: string) => {
   });
 };
 
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: "English",
+  pt: "Portuguese",
+  es: "Spanish",
+  it: "Italian",
+  ru: "Russian",
+  zh: "Simplified Chinese",
+  tr: "Turkish",
+  pl: "Polish",
+  de: "German",
+  fr: "French",
+};
+
+const fetchiTunesSongDetails = async (query: string) => {
+  try {
+    const cleanQuery = query.replace(/\(.*?\)/g, "").trim();
+    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(cleanQuery)}&entity=song&limit=1`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.results && data.results.length > 0) {
+      const track = data.results[0];
+      return {
+        albumCoverUrl: track.artworkUrl100 ? track.artworkUrl100.replace("100x100bb", "600x600bb") : null,
+        albumName: track.collectionName || null,
+        releaseYear: track.releaseDate ? track.releaseDate.substring(0, 4) : null,
+        artistName: track.artistName || null,
+      };
+    }
+  } catch (err) {
+    console.warn("iTunes Search API error:", err);
+  }
+  return null;
+};
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Enable CORS for all hosts and origins
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-gemini-api-key, x-gemini-model, x-app-language");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
+  });
 
   // Set limits for large audio file payloads (base64)
   app.use(express.json({ limit: "100mb" }));
   app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
-  // Endpoint to verify API key validity
+  // Endpoint to check Ollama server connection and list installed models
+  app.post("/api/ollama/check", async (req, res) => {
+    try {
+      const ollamaUrl = (req.body?.ollamaUrl || "http://localhost:11434").replace(/\/$/, "");
+      const tagsUrl = `${ollamaUrl}/api/tags`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch(tagsUrl, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Servidor Ollama retornou código HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const models = (data.models || []).map((m: any) => ({
+        name: m.name,
+        size: m.size,
+        modified_at: m.modified_at,
+      }));
+
+      return res.json({
+        ok: true,
+        message: `Servidor Ollama conectado com sucesso! (${models.length} modelos instalados encontrados)`,
+        models,
+      });
+    } catch (err: any) {
+      return res.status(400).json({
+        ok: false,
+        error: `Não foi possível conectar ao Ollama: ${err.message || "Servidor offline ou URL inacessível"}`,
+      });
+    }
+  });
+
+  // Endpoint to verify API key or provider validity
   app.post("/api/verify-key", async (req, res) => {
     try {
-      const { apiKey, model } = req.body;
+      const { provider, apiKey, model, ollamaUrl } = req.body;
+
+      if (provider === "ollama") {
+        const targetUrl = (ollamaUrl || "http://localhost:11434").replace(/\/$/, "");
+        const response = await fetch(`${targetUrl}/api/tags`);
+        if (!response.ok) throw new Error("Não foi possível comunicar com o Ollama.");
+        const data = await response.json();
+        return res.json({
+          valid: true,
+          message: `Servidor Ollama e modelo (${model || "selecionado"}) prontos para uso!`,
+          models: data.models || [],
+        });
+      }
+
+      // Gemini check
       const keyToTest = apiKey || (req.headers["x-gemini-api-key"] as string) || process.env.GEMINI_API_KEY;
       const targetModel = model || (req.headers["x-gemini-model"] as string) || "gemini-3.6-flash";
 
       if (!keyToTest || keyToTest.trim() === "" || keyToTest === "MY_GEMINI_API_KEY") {
-        return res.status(400).json({ valid: false, error: "Nenhuma chave API fornecida." });
+        return res.status(400).json({ valid: false, error: "Nenhuma chave API do Gemini fornecida." });
       }
 
       const ai = new GoogleGenAI({
@@ -64,7 +162,7 @@ async function startServer() {
     } catch (err: any) {
       return res.status(400).json({
         valid: false,
-        error: err.message || "Falha ao validar a Chave API com o Gemini."
+        error: err.message || "Falha ao validar o provedor."
       });
     }
   });
@@ -82,10 +180,8 @@ async function startServer() {
   app.post("/api/settings", (req, res) => {
     try {
       const { apiKey } = req.body;
-      if (typeof apiKey === "string") {
+      if (typeof apiKey === "string" && apiKey.trim() !== "") {
         process.env.GEMINI_API_KEY = apiKey.trim();
-        
-        // Persist to .env if file exists
         const envPath = path.join(process.cwd(), ".env");
         let envContent = "";
         if (fs.existsSync(envPath)) {
@@ -100,7 +196,7 @@ async function startServer() {
         }
         fs.writeFileSync(envPath, envContent, "utf-8");
       }
-      return res.json({ success: true, message: "Configurações de API salvas." });
+      return res.json({ success: true, message: "Configurações salvas." });
     } catch (err: any) {
       return res.status(500).json({ error: "Erro ao salvar configurações.", details: err.message });
     }
@@ -109,160 +205,195 @@ async function startServer() {
   // API endpoint to analyze music
   app.post("/api/analyze-music", async (req, res) => {
     try {
-      const { fileName, mimeType, fileData, selectedModel: bodyModel } = req.body;
+      const {
+        fileName,
+        mimeType,
+        fileData,
+        provider = "gemini",
+        selectedModel: bodyModel,
+        ollamaUrl = "http://localhost:11434",
+        language = "en"
+      } = req.body;
 
       if (!fileData) {
         return res.status(400).json({ error: "Nenhum arquivo de áudio foi enviado." });
       }
 
-      // Clean the base64 prefix if present
+      // Clean base64 prefix
       const cleanBase64 = fileData.includes(";base64,")
         ? fileData.split(";base64,")[1]
         : fileData;
 
-      // Extract client-provided API key & model from header or body
       const clientApiKey = (req.headers["x-gemini-api-key"] as string) || req.body?.apiKey;
       const targetModel = (req.headers["x-gemini-model"] as string) || bodyModel || req.body?.model || "gemini-3.6-flash";
+      const targetLang = (req.headers["x-app-language"] as string) || language || "en";
+      const targetLangName = LANGUAGE_NAMES[targetLang] || "English";
 
-      // Initialize Gemini Client
-      let ai;
-      try {
-        ai = getGeminiClient(clientApiKey);
-      } catch (err: any) {
-        return res.status(401).json({
-          error: "Chave API do Gemini ausente.",
-          details: err.message,
+      const prompt = `You are a world-class Shazam-like music identification and transcription system.
+Listen to the provided audio file with maximum attention to acoustic fingerprinting, melodies, vocals, chord progressions, and lyrics.
+
+CRITICAL TASK: SONG IDENTIFICATION
+- If this audio corresponds to a real-world commercial song, popular track, indie release, or famous cover, you MUST identify the actual real song title and artist name! Set 'songIdentificationType' to 'recognized' and set 'songName' to "Title by Artist" (e.g., "Bohemian Rhapsody by Queen").
+- Do NOT invent a random fantasy title if it is a real commercial song!
+- Only if the audio is genuinely a custom home recording, original indie demo, or instrumental impro, set 'songIdentificationType' to 'estimate' and generate a fitting title.
+
+CRITICAL LANGUAGE INSTRUCTION:
+Output all textual descriptions, summary, singer profiles (name description, gender, estimated age, estimated nationality) and style tags in ${targetLangName.toUpperCase()} language.
+
+Your task is to return a JSON object with:
+1. songName: Official song name and artist if recognized, or a creative estimated title.
+2. songIdentificationType: 'recognized' or 'estimate'.
+3. lyrics: Precisely transcribed lyrics in Suno.ai structure using bracket tags like [Intro], [Verse], [Chorus], [Bridge], [Guitar Solo], [Vocal Outro].
+4. bpm: Estimated BPM (single integer).
+5. styles: Array of detected styles/moods.
+6. singers: Array of objects with properties { name, gender, estimatedAge, estimatedNationality }.
+7. genres: Array of music genres.
+8. instruments: Array of objects with { name, percentage } where percentage is an integer between 1 and 100 representing the approximate mix presence of each detected musical instrument.
+9. tags: Array of descriptive instruments and production tags.
+10. similarSongs: Array of objects with { name, similarity } where similarity is an integer between 1 and 100.
+11. summary: A gorgeous 1-2 sentence summary of the musical analysis in ${targetLangName}.`;
+
+      if (provider === "ollama") {
+        // Execute analysis via Ollama API
+        const targetOllamaUrl = ollamaUrl.replace(/\/$/, "");
+        const ollamaPayload = {
+          model: targetModel,
+          prompt: `${prompt}\n\nRespond strictly with valid raw JSON object conforming to the specification, with no markdown formatting or extra text wrappers.`,
+          images: [cleanBase64], // Ollama accepts base64 files/images/audio in images field
+          stream: false,
+          format: "json",
+        };
+
+        const ollamaRes = await fetch(`${targetOllamaUrl}/api/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(ollamaPayload),
         });
-      }
 
-      const audioPart = {
-        inlineData: {
-          mimeType: mimeType || "audio/mp3",
-          data: cleanBase64,
-        },
-      };
+        if (!ollamaRes.ok) {
+          throw new Error(`Erro no servidor Ollama (${ollamaRes.status}): ${ollamaRes.statusText}`);
+        }
 
-      const prompt = `Analyze this uploaded music file carefully. Your task is to:
-1. Identify or estimate the name of the song. If it is a known commercial/popular song, provide its actual real title (e.g., "Bohemian Rhapsody") and set the identification type to 'recognized'. If it is unknown, custom, or an indie demo, guess or generate a beautiful and appropriate song name based on the lyrics, vocals, and musical vibe, and set the identification type to 'estimate'.
-2. Transcribe the lyrics precisely. Format the lyrics using the exact Suno.ai structure, utilizing bracket tags like [Intro], [Verse], [Chorus], [Bridge], [Guitar Solo], [Vocal Outro], etc. to divide sections. If there are no vocals (fully instrumental), provide a descriptive musical structure mapping instead (e.g. [Ambient Intro], [Synthesizer Section], [Guitar Melodic Build], [Outro]).
-3. Estimate the BPM (Beats Per Minute) as a single integer number.
-4. Identify the main styles/moods (e.g., energetic, relaxed, nostalgic, epic, futuristic, melancholic, upbeat).
-5. Identify all vocalists/singers in detail. For each vocalist:
-   - name: The singer's real name (if known, e.g. 'Freddie Mercury') or vocal profile (e.g. 'Vocalista Principal Masculino (Barítono)').
-   - gender: The vocal gender ('Masculino', 'Feminino', 'Dueto Misto', 'Coro', or 'Instrumental').
-   - estimatedAge: The estimated age range of the vocalist based on timbre, tone maturity, and delivery (e.g. '24 - 30 anos', '40 - 50 anos').
-   - estimatedNationality: The estimated nationality/origin of the singer inferred from language, phonetic accents, cadence, and vocal style (e.g. 'Brasileiro (Brasil)', 'Norte-Americano (EUA)', 'Britânico (UK)', 'Português', 'Latino-Americano', etc.).
-6. Identify the music genres (e.g. Rock, Synthpop, Lo-fi, Classical, Latin Pop, EDM).
-7. Provide general tags associated with the instruments, production, and vibe.
-8. Suggest 3 to 4 similar real-world known songs (including artist and title, e.g., "Blinding Lights by The Weeknd") along with an estimated percentage of similarity (between 1 and 100) representing how close they are in style, tempo, melody, or emotional vibe.
-9. Write a beautiful, short summary of the musical analysis.`;
+        const ollamaData = await ollamaRes.json();
+        const responseText = ollamaData.response || ollamaData.text || "";
+        const result = JSON.parse(responseText.trim());
+        return res.json(result);
+      } else {
+        // Execute analysis via Google Gemini API
+        let ai;
+        try {
+          ai = getGeminiClient(clientApiKey);
+        } catch (err: any) {
+          return res.status(401).json({
+            error: "Chave API do Gemini ausente.",
+            details: err.message,
+          });
+        }
 
-      // Generate content with selected Gemini model
-      const response = await ai.models.generateContent({
-        model: targetModel,
-        contents: [audioPart, prompt],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              songName: {
-                type: Type.STRING,
-                description: "The official real name of the song if known, or a beautifully guessed/estimated title based on lyrics and mood."
-              },
-              songIdentificationType: {
-                type: Type.STRING,
-                enum: ["recognized", "estimate"],
-                description: "Whether the song was officially recognized as a popular real-world song ('recognized') or guessed/estimated ('estimate')."
-              },
-              lyrics: {
-                type: Type.STRING,
-                description: "The full transcribed lyrics in Suno.ai formatting, complete with structural bracket tags like [Verse], [Chorus], etc."
-              },
-              bpm: {
-                type: Type.INTEGER,
-                description: "The estimated BPM (Beats Per Minute) as a single integer, e.g., 122."
-              },
-              styles: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: "Array of styles or emotional moods detected."
-              },
-              singers: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: {
-                      type: Type.STRING,
-                      description: "Name of the singer or vocal profile (e.g., 'Freddie Mercury' or 'Vocal Principal')."
+        const audioPart = {
+          inlineData: {
+            mimeType: mimeType || "audio/mp3",
+            data: cleanBase64,
+          },
+        };
+
+        const response = await ai.models.generateContent({
+          model: targetModel,
+          contents: [audioPart, prompt],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                songName: { type: Type.STRING },
+                songIdentificationType: { type: Type.STRING, enum: ["recognized", "estimate"] },
+                lyrics: { type: Type.STRING },
+                bpm: { type: Type.INTEGER },
+                styles: { type: Type.ARRAY, items: { type: Type.STRING } },
+                singers: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      name: { type: Type.STRING },
+                      gender: { type: Type.STRING },
+                      estimatedAge: { type: Type.STRING },
+                      estimatedNationality: { type: Type.STRING },
                     },
-                    gender: {
-                      type: Type.STRING,
-                      description: "Gender/type of the vocalist: 'Masculino', 'Feminino', 'Coro', etc."
-                    },
-                    estimatedAge: {
-                      type: Type.STRING,
-                      description: "Estimated age or age range of the vocalist (e.g., '25 - 32 anos')."
-                    },
-                    estimatedNationality: {
-                      type: Type.STRING,
-                      description: "Estimated nationality or regional origin based on accent, dialect and vocal nuance (e.g., 'Brasileiro', 'Norte-Americano (EUA)', 'Britânico')."
-                    }
-                  },
-                  required: ["name", "gender", "estimatedAge", "estimatedNationality"]
+                    required: ["name", "gender", "estimatedAge", "estimatedNationality"]
+                  }
                 },
-                description: "Array of detected vocalists/singers with estimated age and nationality."
-              },
-              genres: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: "Array of music genres."
-              },
-              tags: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: "Array of descriptive descriptive tags."
-              },
-              similarSongs: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: {
-                      type: Type.STRING,
-                      description: "The name and artist of the similar song, e.g., 'Drive by Kavinsky'."
+                genres: { type: Type.ARRAY, items: { type: Type.STRING } },
+                instruments: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      name: { type: Type.STRING },
+                      percentage: { type: Type.INTEGER }
                     },
-                    similarity: {
-                      type: Type.INTEGER,
-                      description: "The percentage of similarity from 1 to 100."
-                    }
-                  },
-                  required: ["name", "similarity"]
+                    required: ["name", "percentage"]
+                  }
                 },
-                description: "Array of 3 to 4 highly similar real-world songs with percentage of similarity."
+                tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                similarSongs: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      name: { type: Type.STRING },
+                      similarity: { type: Type.INTEGER }
+                    },
+                    required: ["name", "similarity"]
+                  }
+                },
+                summary: { type: Type.STRING }
               },
-              summary: {
-                type: Type.STRING,
-                description: "A gorgeous, descriptive 1-2 sentence summary of the musical characteristics."
-              }
-            },
-            required: ["songName", "songIdentificationType", "lyrics", "bpm", "styles", "singers", "genres", "tags", "similarSongs", "summary"]
+              required: ["songName", "songIdentificationType", "lyrics", "bpm", "styles", "singers", "genres", "instruments", "tags", "similarSongs", "summary"]
+            }
+          }
+        });
+
+        const responseText = response.text;
+        if (!responseText) throw new Error("Resposta vazia recebida do Gemini.");
+        const result = JSON.parse(responseText.trim());
+
+        // Enrich result with official iTunes cover art & singer photos
+        if (result.songName) {
+          const itunesInfo = await fetchiTunesSongDetails(result.songName);
+          if (itunesInfo) {
+            if (itunesInfo.albumCoverUrl) result.albumCoverUrl = itunesInfo.albumCoverUrl;
+            if (itunesInfo.albumName) result.albumName = itunesInfo.albumName;
+            if (itunesInfo.releaseYear) result.releaseYear = itunesInfo.releaseYear;
+            if (itunesInfo.artistName) result.artistName = itunesInfo.artistName;
           }
         }
-      });
 
-      const responseText = response.text;
-      if (!responseText) {
-        throw new Error("Empty response received from Gemini.");
+        if (Array.isArray(result.singers)) {
+          result.singers = result.singers.map((singer: any) => {
+            if (typeof singer === "string") {
+              return {
+                name: singer,
+                gender: "Vocalista",
+                estimatedAge: "N/A",
+                estimatedNationality: "Global",
+                photoUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(singer)}&background=1e1b4b&color=88aaff&bold=true&size=256`,
+              };
+            }
+            const nameStr = singer.name || "Vocalista";
+            return {
+              ...singer,
+              photoUrl: singer.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(nameStr)}&background=1e1b4b&color=88aaff&bold=true&size=256`,
+            };
+          });
+        }
+
+        return res.json(result);
       }
-
-      const result = JSON.parse(responseText.trim());
-      return res.json(result);
     } catch (error: any) {
       console.error("Analysis Error:", error);
       return res.status(500).json({
-        error: "Failed to analyze music file.",
+        error: "Falha ao analisar o arquivo de áudio.",
         details: error.message || error
       });
     }

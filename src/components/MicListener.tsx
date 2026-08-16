@@ -2,12 +2,16 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Mic, MicOff, Square, Sparkles, Volume2, AlertCircle, RefreshCw } from "lucide-react";
 
+import { SupportedLanguage, TRANSLATIONS } from "../i18n/translations";
+
 interface MicListenerProps {
   onAudioCaptured: (blob: Blob, base64Data: string, mimeType: string) => void;
   disabled?: boolean;
+  language?: SupportedLanguage;
 }
 
-export default function MicListener({ onAudioCaptured, disabled }: MicListenerProps) {
+export default function MicListener({ onAudioCaptured, disabled, language = "en" }: MicListenerProps) {
+  const t = TRANSLATIONS[language] || TRANSLATIONS.en;
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [micError, setMicError] = useState<string | null>(null);
@@ -49,24 +53,56 @@ export default function MicListener({ onAudioCaptured, disabled }: MicListenerPr
     }
   };
 
+  const getAudioStream = async (): Promise<MediaStream> => {
+    const constraints: MediaStreamConstraints = {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: false,
+        autoGainControl: true,
+      },
+    };
+
+    // Standard modern mediaDevices API
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === "function") {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    }
+
+    // Legacy vendor-prefixed getUserMedia fallback (older Android WebViews / Safari)
+    const legacyGetUserMedia =
+      (navigator as any).getUserMedia ||
+      (navigator as any).webkitGetUserMedia ||
+      (navigator as any).mozGetUserMedia ||
+      (navigator as any).msGetUserMedia;
+
+    if (legacyGetUserMedia) {
+      return new Promise((resolve, reject) => {
+        legacyGetUserMedia.call(navigator, constraints, resolve, reject);
+      });
+    }
+
+    // Diagnostic error for mobile browsers accessing over insecure HTTP IP
+    const isSecureContext =
+      window.isSecureContext ||
+      window.location.protocol === "https:" ||
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1";
+
+    if (!isSecureContext) {
+      throw new Error(
+        "A gravação via microfone no smartphone exige conexão segura (HTTPS). Navegadores mobile (Safari/Chrome) bloqueiam a captura de áudio ao acessar por IP na rede local via HTTP sem HTTPS. Acesse via HTTPS ou localhost."
+      );
+    }
+
+    throw new Error("Seu navegador não suporta captura de áudio via microfone.");
+  };
+
   const startListening = async () => {
     setMicError(null);
     setRecordingTime(0);
     audioChunksRef.current = [];
 
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Seu navegador não suporta captura de áudio via microfone.");
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: false,
-          autoGainControl: true,
-        },
-      });
-
+      const stream = await getAudioStream();
       streamRef.current = stream;
 
       // Setup Web Audio API Analyser for real-time visualizer feedback
@@ -99,17 +135,28 @@ export default function MicListener({ onAudioCaptured, disabled }: MicListenerPr
         console.warn("Analyser setup error", e);
       }
 
-      // Determine supported mimeType
-      let mimeType = "audio/webm";
-      if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
-        mimeType = "audio/webm;codecs=opus";
-      } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
-        mimeType = "audio/mp4";
-      } else if (MediaRecorder.isTypeSupported("audio/ogg")) {
-        mimeType = "audio/ogg";
+      // Determine supported mimeType cross-platform (iOS Safari, Android Chrome)
+      let selectedMimeType = "";
+      if (typeof MediaRecorder !== "undefined" && typeof MediaRecorder.isTypeSupported === "function") {
+        const candidateTypes = [
+          "audio/webm;codecs=opus",
+          "audio/mp4",
+          "audio/aac",
+          "audio/webm",
+          "audio/ogg",
+          "audio/wav",
+        ];
+        for (const type of candidateTypes) {
+          if (MediaRecorder.isTypeSupported(type)) {
+            selectedMimeType = type;
+            break;
+          }
+        }
       }
 
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      const recorderOptions = selectedMimeType ? { mimeType: selectedMimeType } : undefined;
+      const mediaRecorder = new MediaRecorder(stream, recorderOptions);
+      const activeMimeType = mediaRecorder.mimeType || selectedMimeType || "audio/webm";
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -119,7 +166,7 @@ export default function MicListener({ onAudioCaptured, disabled }: MicListenerPr
       };
 
       mediaRecorder.onstop = async () => {
-        const recordedBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        const recordedBlob = new Blob(audioChunksRef.current, { type: activeMimeType });
         stopRecordingCleanup();
         setIsRecording(false);
 
@@ -133,7 +180,7 @@ export default function MicListener({ onAudioCaptured, disabled }: MicListenerPr
         reader.readAsDataURL(recordedBlob);
         reader.onloadend = () => {
           const base64data = reader.result as string;
-          onAudioCaptured(recordedBlob, base64data, mimeType);
+          onAudioCaptured(recordedBlob, base64data, activeMimeType);
         };
       };
 
