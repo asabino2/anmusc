@@ -229,13 +229,15 @@ async function startServer() {
       const targetLang = (req.headers["x-app-language"] as string) || language || "en";
       const targetLangName = LANGUAGE_NAMES[targetLang] || "English";
 
-      const prompt = `You are a world-class Shazam-like music identification and transcription system.
-Listen to the provided audio file with maximum attention to acoustic fingerprinting, melodies, vocals, chord progressions, and lyrics.
+      const prompt = `You are a world-class Shazam-like acoustic music identification and transcription system.
+Listen to the provided audio sample with maximum attention to acoustic fingerprinting, melodies, vocal pitch, chord progressions, and lyrics.
 
-CRITICAL TASK: SONG IDENTIFICATION
-- If this audio corresponds to a real-world commercial song, popular track, indie release, or famous cover, you MUST identify the actual real song title and artist name! Set 'songIdentificationType' to 'recognized' and set 'songName' to "Title by Artist" (e.g., "Bohemian Rhapsody by Queen").
-- Do NOT invent a random fantasy title if it is a real commercial song!
-- Only if the audio is genuinely a custom home recording, original indie demo, or instrumental impro, set 'songIdentificationType' to 'estimate' and generate a fitting title.
+CRITICAL TASK: SHAZAM-STYLE AMBIENT AUDIO IDENTIFICATION
+- The audio sample may be recorded via a live microphone in ambient noise, background hum, low volume, or slightly distorted acoustics.
+- Filter out background noise, hums, or ambient room reverb and focus on the core melody, vocal timbre, drum pattern, or lyric snippet.
+- If the audio corresponds to any known real-world commercial song, popular track, indie release, or cover version, identify the EXACT real song title and artist name! Set 'songIdentificationType' to 'recognized' and set 'songName' to "Song Title by Artist Name" (e.g., "Bohemian Rhapsody by Queen" or "Shape of You by Ed Sheeran").
+- DO NOT invent a fantasy title if it is a real commercial song!
+- Only if the audio is genuinely an original custom home demo or improvised recording should you set 'songIdentificationType' to 'estimate' and generate a fitting title.
 
 CRITICAL LANGUAGE INSTRUCTION:
 Output all textual descriptions, summary, singer profiles (name description, gender, estimated age, estimated nationality) and style tags in ${targetLangName.toUpperCase()} language.
@@ -290,9 +292,11 @@ Your task is to return a JSON object with:
           });
         }
 
+        const cleanMimeType = (mimeType || "audio/mp3").split(";")[0].trim();
+
         const audioPart = {
           inlineData: {
-            mimeType: mimeType || "audio/mp3",
+            mimeType: cleanMimeType,
             data: cleanBase64,
           },
         };
@@ -362,6 +366,10 @@ Your task is to return a JSON object with:
         if (result.songName) {
           const itunesInfo = await fetchiTunesSongDetails(result.songName);
           if (itunesInfo) {
+            if (itunesInfo.officialSongName && (result.songIdentificationType === "recognized" || !result.songName.includes(" by "))) {
+              result.songName = itunesInfo.officialSongName;
+              result.songIdentificationType = "recognized";
+            }
             if (itunesInfo.albumCoverUrl) result.albumCoverUrl = itunesInfo.albumCoverUrl;
             if (itunesInfo.albumName) result.albumName = itunesInfo.albumName;
             if (itunesInfo.releaseYear) result.releaseYear = itunesInfo.releaseYear;

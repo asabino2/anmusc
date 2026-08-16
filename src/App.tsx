@@ -372,7 +372,53 @@ export default function App() {
         {/* Main Content Area */}
         <div className="w-full">
           <AnimatePresence mode="wait">
-            {analysis ? (
+            {isLoading ? (
+              <motion.div
+                key="loading"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="w-full max-w-2xl mx-auto glass-card rounded-3xl p-12 border border-white/10 shadow-2xl flex flex-col items-center justify-center text-center space-y-6 relative overflow-hidden"
+              >
+                {/* Shazam Radar Glow Effect */}
+                <div className="relative flex items-center justify-center my-4">
+                  <motion.div
+                    animate={{ scale: [1, 1.8, 1], opacity: [0.6, 0, 0.6] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                    className="absolute w-32 h-32 rounded-full bg-[#88aaff]/20 border border-[#88aaff]/40"
+                  />
+                  <motion.div
+                    animate={{ scale: [1, 1.4, 1], opacity: [0.8, 0.2, 0.8] }}
+                    transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: 0.3 }}
+                    className="absolute w-24 h-24 rounded-full bg-indigo-500/30 border border-indigo-500/50"
+                  />
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-[#88aaff] to-indigo-600 flex items-center justify-center shadow-[0_0_30px_rgba(136,170,255,0.6)] relative z-10">
+                    <Sparkles className="w-10 h-10 text-black animate-spin" style={{ animationDuration: "6s" }} />
+                  </div>
+                </div>
+
+                <div className="space-y-2 max-w-md">
+                  <h3 className="text-2xl font-black text-white tracking-tight">
+                    {t.analyzingAudio || "Analisando..."}
+                  </h3>
+                  <p className="text-xs text-white/60 font-medium leading-relaxed">
+                    {t.analyzingSub || "Identificando música estilo Shazam, transcrevendo letra (Suno.ai), BPM, vocalistas e instrumentos..."}
+                  </p>
+                </div>
+
+                {/* Animated waveform bars */}
+                <div className="flex items-center gap-1.5 pt-4">
+                  {[40, 75, 55, 90, 60, 85, 45, 95, 70, 50, 80, 65].map((h, i) => (
+                    <motion.div
+                      key={i}
+                      animate={{ height: ["12px", `${h}px`, "12px"] }}
+                      transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.08, ease: "easeInOut" }}
+                      className="w-1.5 bg-gradient-to-t from-indigo-500 to-[#88aaff] rounded-full"
+                    />
+                  ))}
+                </div>
+              </motion.div>
+            ) : analysis ? (
               <AnalysisResult
                 key="results"
                 analysis={analysis}
