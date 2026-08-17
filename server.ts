@@ -77,19 +77,30 @@ const DEFAULT_OPENROUTER_AUDIO_MODELS = [
 const fetchiTunesSongDetails = async (query: string) => {
   try {
     const cleanQuery = query.replace(/\(.*?\)/g, "").trim();
+    if (!cleanQuery || cleanQuery.length < 2) return null;
+
     const url = `https://itunes.apple.com/search?term=${encodeURIComponent(cleanQuery)}&entity=song&limit=1`;
     const res = await fetch(url);
     if (!res.ok) return null;
     const data = await res.json();
     if (data.results && data.results.length > 0) {
       const track = data.results[0];
-      return {
-        officialSongName: track.trackName && track.artistName ? `${track.trackName} by ${track.artistName}` : null,
-        albumCoverUrl: track.artworkUrl100 ? track.artworkUrl100.replace("100x100bb", "600x600bb") : null,
-        albumName: track.collectionName || null,
-        releaseYear: track.releaseDate ? track.releaseDate.substring(0, 4) : null,
-        artistName: track.artistName || null,
-      };
+      const fullTrackTitle = `${track.trackName || ""} ${track.artistName || ""}`.toLowerCase();
+      const queryLower = cleanQuery.toLowerCase();
+
+      const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
+      const matchCount = queryWords.filter(word => fullTrackTitle.includes(word)).length;
+
+      // Verify that query words match iTunes result
+      if (queryWords.length === 0 || matchCount / Math.max(queryWords.length, 1) >= 0.4) {
+        return {
+          officialSongName: track.trackName && track.artistName ? `${track.trackName} by ${track.artistName}` : null,
+          albumCoverUrl: track.artworkUrl100 ? track.artworkUrl100.replace("100x100bb", "600x600bb") : null,
+          albumName: track.collectionName || null,
+          releaseYear: track.releaseDate ? track.releaseDate.substring(0, 4) : null,
+          artistName: track.artistName || null,
+        };
+      }
     }
   } catch (err) {
     console.warn("iTunes Search API error:", err);
@@ -130,32 +141,87 @@ const fetchStreamingLinksForSong = async (query: string) => {
   return null;
 };
 
-const enrichAnalysisResult = async (result: any) => {
-  if (!result || typeof result !== "object") return result;
+const calculateLyricOverlap = (transcribedLyrics: string, referenceLyrics: string) => {
+  const getNormalizedWords = (text: string) =>
+    text
+      .replace(/\[.*?\]/g, " ")
+      .toLowerCase()
+      .replace(/[^\w\s\u00C0-\u00FF]/g, " ")
+      .split(/\s+/)
+      .filter(w => w.length > 2);
 
-  // Enrich main song iTunes details
-  if (result.songName) {
-    const itunesInfo = await fetchiTunesSongDetails(result.songName);
-    if (itunesInfo) {
-      if (itunesInfo.officialSongName && (result.songIdentificationType === "recognized" || !result.songName.includes(" by "))) {
-        result.songName = itunesInfo.officialSongName;
-        result.songIdentificationType = "recognized";
+  const tWords = getNormalizedWords(transcribedLyrics);
+  const rWords = getNormalizedWords(referenceLyrics);
+
+  if (tWords.length === 0 || rWords.length === 0) {
+    return { similarity: 0, matchedPhrases: [] };
+  }
+
+  const rSet = new Set(rWords);
+  const matchedWordCount = tWords.filter(w => rSet.has(w)).length;
+
+  const tSet = new Set(tWords);
+  let intersection = 0;
+  for (const w of tSet) {
+    if (rSet.has(w)) intersection++;
+  }
+  const unionSize = new Set([...tSet, ...rSet]).size || 1;
+  const jaccard = intersection / unionSize;
+  const overlapT = matchedWordCount / tWords.length;
+
+  const similarityScore = Math.max(jaccard, overlapT);
+
+  const transcribedLines = transcribedLyrics.split("\n");
+  const matchedPhrases: string[] = [];
+
+  for (const rawLine of transcribedLines) {
+    const lineClean = rawLine.replace(/\[.*?\]/g, "").trim();
+    if (lineClean.length < 6) continue;
+
+    const lineWords = getNormalizedWords(lineClean);
+    if (lineWords.length === 0) continue;
+
+    const lineMatchCount = lineWords.filter(w => rSet.has(w)).length;
+    if (lineMatchCount / lineWords.length >= 0.6) {
+      matchedPhrases.push(lineClean);
+    }
+  }
+
+  return {
+    similarity: Math.min(100, Math.round(similarityScore * 100)),
+    matchedPhrases,
+  };
+};
+
+const fetchLrclibLyrics = async (query: string) => {
+  try {
+    const cleanQuery = query.replace(/\(.*?\)/g, "").trim();
+    if (!cleanQuery || cleanQuery.length < 2) return null;
+
+    const url = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanQuery)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      for (const item of data) {
+        if (item.plainLyrics && item.plainLyrics.trim().length > 30) {
+          return {
+            officialSongName: `${item.trackName} by ${item.artistName}`,
+            trackName: item.trackName,
+            artistName: item.artistName,
+            albumName: item.albumName || null,
+            plainLyrics: item.plainLyrics,
+          };
+        }
       }
-      if (itunesInfo.albumCoverUrl) result.albumCoverUrl = itunesInfo.albumCoverUrl;
-      if (itunesInfo.albumName) result.albumName = itunesInfo.albumName;
-      if (itunesInfo.releaseYear) result.releaseYear = itunesInfo.releaseYear;
-      if (itunesInfo.artistName) result.artistName = itunesInfo.artistName;
     }
+  } catch (err) {
+    console.warn("LRCLIB API Search error:", err);
   }
+  return null;
+};
 
-  // Enrich main song streaming links ONLY if recognized
-  if (result.songName && result.songIdentificationType === "recognized") {
-    const mainLinks = await fetchStreamingLinksForSong(result.songName);
-    if (mainLinks) {
-      result.streamingLinks = mainLinks;
-    }
-  }
-
+const finalizeEnrichment = async (result: any) => {
   // Enrich similar songs streaming links if verified on streaming platforms
   if (Array.isArray(result.similarSongs)) {
     result.similarSongs = await Promise.all(
@@ -198,6 +264,76 @@ const enrichAnalysisResult = async (result: any) => {
   }
 
   return result;
+};
+
+const enrichAnalysisResult = async (result: any) => {
+  if (!result || typeof result !== "object") return result;
+
+  // Case 1: Exact Shazam acoustic match verified on iTunes
+  if (result.songName && result.songIdentificationType === "recognized") {
+    const itunesInfo = await fetchiTunesSongDetails(result.songName);
+    if (itunesInfo && itunesInfo.officialSongName) {
+      result.songName = itunesInfo.officialSongName;
+      if (itunesInfo.albumCoverUrl) result.albumCoverUrl = itunesInfo.albumCoverUrl;
+      if (itunesInfo.albumName) result.albumName = itunesInfo.albumName;
+      if (itunesInfo.releaseYear) result.releaseYear = itunesInfo.releaseYear;
+      if (itunesInfo.artistName) result.artistName = itunesInfo.artistName;
+
+      const mainLinks = await fetchStreamingLinksForSong(result.songName);
+      if (mainLinks) result.streamingLinks = mainLinks;
+      return await finalizeEnrichment(result);
+    }
+  }
+
+  // Case 2: Lyric Match verification via full-text LRCLIB lyric comparison
+  if (result.lyrics) {
+    const candidateQuery = (result.songName && result.songName.includes(" by "))
+      ? result.songName
+      : result.lyrics
+          .split("\n")
+          .map(line => line.replace(/\[.*?\]/g, "").trim())
+          .filter(line => line.length > 15)
+          .slice(0, 2)
+          .join(" ");
+
+    if (candidateQuery && candidateQuery.trim().length > 3) {
+      const lrclibResult = await fetchLrclibLyrics(candidateQuery);
+      if (lrclibResult && lrclibResult.plainLyrics) {
+        const { similarity, matchedPhrases } = calculateLyricOverlap(result.lyrics, lrclibResult.plainLyrics);
+
+        // Accept lyric match ONLY if full-text similarity is >= 65%
+        if (similarity >= 65) {
+          const songName = lrclibResult.officialSongName;
+          const itunesInfo = await fetchiTunesSongDetails(songName);
+          const mainLinks = await fetchStreamingLinksForSong(songName);
+
+          result.songName = songName;
+          result.songIdentificationType = "lyric_match";
+          result.lyricMatchPercentage = Math.max(similarity, result.lyricMatchPercentage || 0);
+          result.matchedLyricPhrases = matchedPhrases;
+          if (itunesInfo?.albumCoverUrl) result.albumCoverUrl = itunesInfo.albumCoverUrl;
+          if (itunesInfo?.albumName) result.albumName = itunesInfo.albumName;
+          if (itunesInfo?.releaseYear) result.releaseYear = itunesInfo.releaseYear;
+          if (itunesInfo?.artistName) result.artistName = itunesInfo.artistName;
+          if (mainLinks) result.streamingLinks = mainLinks;
+
+          return await finalizeEnrichment(result);
+        }
+      }
+    }
+  }
+
+  // Case 3: Revert to estimate if no acoustic Shazam match or verified >65% lyric match
+  result.songIdentificationType = "estimate";
+  delete result.albumCoverUrl;
+  delete result.albumName;
+  delete result.releaseYear;
+  delete result.artistName;
+  delete result.streamingLinks;
+  delete result.lyricMatchPercentage;
+  delete result.matchedLyricPhrases;
+
+  return await finalizeEnrichment(result);
 };
 
 async function startServer() {
@@ -457,19 +593,21 @@ async function startServer() {
       const prompt = `You are a world-class Shazam-like acoustic music identification and transcription system.
 Listen to the provided audio sample with maximum attention to acoustic fingerprinting, melodies, vocal pitch, chord progressions, and lyrics.
 
-CRITICAL TASK: SHAZAM-STYLE AMBIENT AUDIO IDENTIFICATION
+CRITICAL TASK: SHAZAM-STYLE AMBIENT AUDIO & LYRIC IDENTIFICATION
 - The audio sample may be recorded via a live microphone in ambient noise, background hum, low volume, or slightly distorted acoustics.
 - Filter out background noise, hums, or ambient room reverb and focus on the core melody, vocal timbre, drum pattern, or lyric snippet.
-- If the audio corresponds to any known real-world commercial song, popular track, indie release, or cover version, identify the EXACT real song title and artist name! Set 'songIdentificationType' to 'recognized' and set 'songName' to "Song Title by Artist Name" (e.g., "Bohemian Rhapsody by Queen" or "Shape of You by Ed Sheeran").
+- IDENTIFICATION TYPES ('songIdentificationType'):
+  * 'recognized': Set ONLY IF the audio is an exact acoustic match of a known real-world commercial master recording or official cover version (same performance/melody/recording). Set 'songName' to "Song Title by Artist Name" (e.g. "Bohemian Rhapsody by Queen").
+  * 'lyric_match': Set IF the audio is an AI-generated song (Suno/Udio), custom cover, or new musical arrangement, BUT the transcribed lyrics correspond by >90% to an existing commercial song's lyrics! Set 'songName' to "Song Title by Artist Name".
+  * 'estimate': Set IF the audio is an original custom song, home demo, or AI track with unique/original lyrics (no commercial song lyrics match >90%). Set 'songName' to a fitting title for the song (e.g. "Vozes do Amanhã").
 - DO NOT invent a fantasy title if it is a real commercial song!
-- Only if the audio is genuinely an original custom home demo or improvised recording should you set 'songIdentificationType' to 'estimate' and generate a fitting title.
 
 CRITICAL LANGUAGE INSTRUCTION:
 Output all textual descriptions, summary, singer profiles (name description, gender, estimated age, estimated nationality), style tags, rating strengths, improvements, potential issues, and feedback in ${targetLangName.toUpperCase()} language.
 
 Your task is to return a JSON object with:
-1. songName: Official song name and artist if recognized, or a creative estimated title.
-2. songIdentificationType: 'recognized' or 'estimate'.
+1. songName: Official song name and artist if recognized/lyric match, or a creative estimated title.
+2. songIdentificationType: 'recognized', 'lyric_match', or 'estimate'.
 3. lyrics: Precisely transcribed lyrics in Suno.ai structure using bracket tags like [Intro], [Verse], [Chorus], [Bridge], [Guitar Solo], [Vocal Outro].
 4. bpm: Estimated BPM (single integer).
 5. styles: Array of detected styles/moods.
@@ -647,7 +785,7 @@ Your task is to return a JSON object with:
                 type: Type.OBJECT,
                 properties: {
                   songName: { type: Type.STRING },
-                  songIdentificationType: { type: Type.STRING, enum: ["recognized", "estimate"] },
+                  songIdentificationType: { type: Type.STRING, enum: ["recognized", "lyric_match", "estimate"] },
                   lyrics: { type: Type.STRING },
                   bpm: { type: Type.INTEGER },
                   styles: { type: Type.ARRAY, items: { type: Type.STRING } },

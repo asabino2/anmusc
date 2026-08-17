@@ -119,7 +119,7 @@ export default function AnalysisResult({
   // Pulse duration in seconds based on BPM
   const pulseDuration = 60 / (analysis.bpm || 120);
 
-  // Parse lyrics lines and highlight brackets
+  // Parse lyrics lines and highlight brackets & lyric matches
   const renderedLyrics = analysis.lyrics.split("\n").map((line, index) => {
     const trimmed = line.trim();
     if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
@@ -132,8 +132,33 @@ export default function AnalysisResult({
         </div>
       );
     }
+
+    const isMatchedLine =
+      analysis.songIdentificationType === "lyric_match" &&
+      trimmed.length > 0 &&
+      (
+        !analysis.matchedLyricPhrases ||
+        analysis.matchedLyricPhrases.length === 0 ||
+        analysis.matchedLyricPhrases.some((phrase) =>
+          trimmed.toLowerCase().includes(phrase.toLowerCase()) ||
+          phrase.toLowerCase().includes(trimmed.toLowerCase())
+        )
+      );
+
+    if (isMatchedLine) {
+      return (
+        <div
+          key={index}
+          className="my-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/35 text-amber-200 text-sm md:text-base font-medium flex items-center gap-2.5 shadow-sm transition-all"
+        >
+          <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 shadow-[0_0_8px_rgba(251,191,36,0.8)]"></span>
+          <span className="leading-relaxed">{line}</span>
+        </div>
+      );
+    }
+
     return (
-      <p key={index} className="text-white/70 text-sm md:text-base leading-relaxed min-h-[1.5rem] hover:text-white transition-colors duration-150">
+      <p key={index} className="text-white/70 text-sm md:text-base leading-relaxed min-h-[1.5rem] hover:text-white transition-colors duration-150 px-2 py-0.5">
         {line}
       </p>
     );
@@ -157,7 +182,15 @@ export default function AnalysisResult({
         <AudioPlayerBar
           audioUrl={audioUrl}
           title={analysis.songName || songTitle || "Áudio Carregado"}
-          subtitle={songArtist || (analysis.songIdentificationType === "recognized" ? "Música Reconhecida" : "Análise em Reprodução")}
+          subtitle={
+            songArtist || (
+              analysis.songIdentificationType === "recognized"
+                ? (t.matchRecognized || "Música Reconhecida")
+                : analysis.songIdentificationType === "lyric_match"
+                ? (t.matchByLyrics || "Match por Letra")
+                : "Análise em Reprodução"
+            )
+          }
         />
       )}
 
@@ -394,14 +427,24 @@ export default function AnalysisResult({
               <div className="flex justify-between items-start">
                 <span className="text-[10px] font-mono uppercase tracking-widest text-white/50 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-[#88aaff]" />
-                  {analysis.songIdentificationType === "recognized" ? "RECOGNIZED TRACK" : "AI ESTIMATED TITLE"}
+                  {analysis.songIdentificationType === "recognized"
+                    ? (t.recognizedTrack || "RECOGNIZED TRACK")
+                    : analysis.songIdentificationType === "lyric_match"
+                    ? (t.lyricMatchTrack || "MATCH POR LETRA")
+                    : (t.aiEstimatedTitle || "AI ESTIMATED TITLE")}
                 </span>
                 <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
                   analysis.songIdentificationType === "recognized"
                     ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
+                    : analysis.songIdentificationType === "lyric_match"
+                    ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
                     : "bg-indigo-500/10 text-indigo-300 border-indigo-500/30"
                 }`}>
-                  {analysis.songIdentificationType === "recognized" ? "Match Recognized" : "AI Vibe Estimate"}
+                  {analysis.songIdentificationType === "recognized"
+                    ? (t.matchRecognized || "Match Recognized")
+                    : analysis.songIdentificationType === "lyric_match"
+                    ? `${t.matchByLyrics || "Match por Letra"} (${analysis.lyricMatchPercentage || 90}%)`
+                    : (t.aiVibeEstimate || "AI Vibe Estimate")}
                 </span>
               </div>
 
@@ -425,7 +468,7 @@ export default function AnalysisResult({
                       Álbum: {analysis.albumName} {analysis.releaseYear ? `(${analysis.releaseYear})` : ""}
                     </p>
                   )}
-                  {analysis.songIdentificationType === "recognized" && (
+                  {(analysis.songIdentificationType === "recognized" || analysis.songIdentificationType === "lyric_match") && (
                     <StreamingButtons links={analysis.streamingLinks} />
                   )}
                 </div>

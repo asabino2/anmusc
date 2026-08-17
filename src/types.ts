@@ -37,7 +37,9 @@ export interface MusicRating {
 
 export interface MusicAnalysis {
   songName: string;
-  songIdentificationType: "recognized" | "estimate";
+  songIdentificationType: "recognized" | "lyric_match" | "estimate";
+  lyricMatchPercentage?: number;
+  matchedLyricPhrases?: string[];
   albumCoverUrl?: string;
   albumName?: string;
   releaseYear?: string;
