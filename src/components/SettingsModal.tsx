@@ -14,13 +14,16 @@ import {
   Cpu,
   Globe,
   Server,
-  Sparkles
+  Sparkles,
+  Layers,
+  Volume2
 } from "lucide-react";
 import {
   SupportedLanguage,
   SUPPORTED_LANGUAGES,
   TRANSLATIONS,
 } from "../i18n/translations";
+import { AIProvider } from "../types";
 
 export const MODEL_OPTIONS = [
   {
@@ -46,12 +49,16 @@ export const MODEL_OPTIONS = [
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  provider: "gemini" | "ollama";
-  onSaveProvider: (provider: "gemini" | "ollama") => void;
+  provider: AIProvider;
+  onSaveProvider: (provider: AIProvider) => void;
   apiKey: string;
   onSaveApiKey: (newKey: string) => void;
   selectedModel: string;
   onSaveModel: (model: string) => void;
+  openrouterApiKey: string;
+  onSaveOpenRouterApiKey: (newKey: string) => void;
+  openrouterModel: string;
+  onSaveOpenRouterModel: (model: string) => void;
   ollamaUrl: string;
   onSaveOllamaUrl: (url: string) => void;
   ollamaModel: string;
@@ -69,6 +76,10 @@ export default function SettingsModal({
   onSaveApiKey,
   selectedModel,
   onSaveModel,
+  openrouterApiKey,
+  onSaveOpenRouterApiKey,
+  openrouterModel,
+  onSaveOpenRouterModel,
   ollamaUrl,
   onSaveOllamaUrl,
   ollamaModel,
@@ -78,14 +89,21 @@ export default function SettingsModal({
 }: SettingsModalProps) {
   const t = TRANSLATIONS[language] || TRANSLATIONS.en;
 
-  const [inputProvider, setInputProvider] = useState<"gemini" | "ollama">(provider || "gemini");
+  const [inputProvider, setInputProvider] = useState<AIProvider>(provider || "gemini");
   const [inputKey, setInputKey] = useState(apiKey);
   const [inputModel, setInputModel] = useState(selectedModel || "gemini-3.6-flash");
+  
+  const [inputOpenRouterKey, setInputOpenRouterKey] = useState(openrouterApiKey || "");
+  const [inputOpenRouterModel, setInputOpenRouterModel] = useState(openrouterModel || "google/gemini-2.5-flash");
+  const [openrouterModels, setOpenRouterModels] = useState<Array<{ id: string; name: string; description?: string }>>([]);
+  const [isLoadingOpenRouterModels, setIsLoadingOpenRouterModels] = useState(false);
+
   const [inputOllamaUrl, setInputOllamaUrl] = useState(ollamaUrl || "http://localhost:11434");
   const [inputOllamaModel, setInputOllamaModel] = useState(ollamaModel || "");
   const [inputLanguage, setInputLanguage] = useState<SupportedLanguage>(language || "en");
   
   const [showKey, setShowKey] = useState(false);
+  const [showORKey, setShowORKey] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isCheckingOllama, setIsCheckingOllama] = useState(false);
   const [ollamaModels, setOllamaModels] = useState<Array<{ name: string }>>([]);
@@ -98,16 +116,42 @@ export default function SettingsModal({
   } | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  const fetchOpenRouterModels = async () => {
+    setIsLoadingOpenRouterModels(true);
+    try {
+      const response = await fetch("/api/openrouter/models");
+      const data = await response.json();
+      if (data.ok && Array.isArray(data.models)) {
+        setOpenRouterModels(data.models);
+        if (!inputOpenRouterModel && data.models.length > 0) {
+          setInputOpenRouterModel(data.models[0].id);
+        }
+      }
+    } catch (err) {
+      console.warn("Erro ao buscar modelos do OpenRouter:", err);
+    } finally {
+      setIsLoadingOpenRouterModels(false);
+    }
+  };
+
   useEffect(() => {
     setInputProvider(provider || "gemini");
     setInputKey(apiKey);
     setInputModel(selectedModel || "gemini-3.6-flash");
+    setInputOpenRouterKey(openrouterApiKey || "");
+    setInputOpenRouterModel(openrouterModel || "google/gemini-2.5-flash");
     setInputOllamaUrl(ollamaUrl || "http://localhost:11434");
     setInputOllamaModel(ollamaModel || "");
     setInputLanguage(language || "en");
     setVerifyStatus(null);
     setOllamaCheckStatus(null);
-  }, [provider, apiKey, selectedModel, ollamaUrl, ollamaModel, language, isOpen]);
+  }, [provider, apiKey, selectedModel, openrouterApiKey, openrouterModel, ollamaUrl, ollamaModel, language, isOpen]);
+
+  useEffect(() => {
+    if (isOpen && inputProvider === "openrouter" && openrouterModels.length === 0) {
+      fetchOpenRouterModels();
+    }
+  }, [isOpen, inputProvider]);
 
   if (!isOpen) return null;
 
@@ -129,14 +173,21 @@ export default function SettingsModal({
         if (data.models && data.models.length > 0 && !inputOllamaModel) {
           setInputOllamaModel(data.models[0].name);
         }
-        setOllamaCheckStatus(data.message || `Conectado ao Ollama! ${data.models.length} modelos encontrados.`);
+        setOllamaCheckStatus(data.message || `Conectado ao Ollama! ${data.models.length} modelo(s) encontrado(s).`);
       } else {
         setOllamaModels([]);
+        console.error("==================================================");
+        console.error("[OLLAMA CHECK ERROR DETAILS]:", data);
+        console.error("==================================================");
         setOllamaCheckStatus(data.error || "Falha ao conectar com o Ollama.");
       }
     } catch (err: any) {
       setOllamaModels([]);
-      setOllamaCheckStatus("Erro ao conectar no servidor Ollama local.");
+      console.error("==================================================");
+      console.error("[OLLAMA CHECK EXCEPTION DETAILS]:", err);
+      if (err.stack) console.error("Stack Trace:\n", err.stack);
+      console.error("==================================================");
+      setOllamaCheckStatus(`Erro ao conectar no servidor Ollama local: ${err.message || "Sem resposta"}`);
     } finally {
       setIsCheckingOllama(false);
     }
@@ -147,13 +198,25 @@ export default function SettingsModal({
     setVerifyStatus(null);
 
     try {
+      const currentApiKey = inputProvider === "gemini" 
+        ? inputKey.trim() 
+        : inputProvider === "openrouter" 
+        ? inputOpenRouterKey.trim() 
+        : "";
+      
+      const currentModel = inputProvider === "gemini" 
+        ? inputModel 
+        : inputProvider === "openrouter" 
+        ? inputOpenRouterModel 
+        : inputOllamaModel;
+
       const response = await fetch("/api/verify-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider: inputProvider,
-          apiKey: inputKey.trim(),
-          model: inputProvider === "gemini" ? inputModel : inputOllamaModel,
+          apiKey: currentApiKey,
+          model: currentModel,
           ollamaUrl: inputOllamaUrl.trim(),
         }),
       });
@@ -167,6 +230,9 @@ export default function SettingsModal({
           message: data.message || "Provedor e modelo validados com sucesso!",
         });
       } else {
+        console.error("==================================================");
+        console.error("[PROVIDER TEST ERROR DETAILS]:", data);
+        console.error("==================================================");
         setVerifyStatus({
           tested: true,
           valid: false,
@@ -174,10 +240,14 @@ export default function SettingsModal({
         });
       }
     } catch (err: any) {
+      console.error("==================================================");
+      console.error("[PROVIDER TEST EXCEPTION DETAILS]:", err);
+      if (err.stack) console.error("Stack Trace:\n", err.stack);
+      console.error("==================================================");
       setVerifyStatus({
         tested: true,
         valid: false,
-        message: "Não foi possível comunicar com o servidor.",
+        message: `Não foi possível comunicar com o servidor: ${err.message || "Sem resposta"}`,
       });
     } finally {
       setIsVerifying(false);
@@ -185,10 +255,14 @@ export default function SettingsModal({
   };
 
   const handleSave = async () => {
-    const trimmedKey = inputKey.trim();
+    const trimmedGeminiKey = inputKey.trim();
+    const trimmedORKey = inputOpenRouterKey.trim();
+
     onSaveProvider(inputProvider);
-    onSaveApiKey(trimmedKey);
+    onSaveApiKey(trimmedGeminiKey);
     onSaveModel(inputModel);
+    onSaveOpenRouterApiKey(trimmedORKey);
+    onSaveOpenRouterModel(inputOpenRouterModel);
     onSaveOllamaUrl(inputOllamaUrl.trim());
     onSaveOllamaModel(inputOllamaModel);
     onSaveLanguage(inputLanguage);
@@ -199,8 +273,10 @@ export default function SettingsModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider: inputProvider,
-          apiKey: trimmedKey,
+          apiKey: trimmedGeminiKey,
           model: inputModel,
+          openrouterApiKey: trimmedORKey,
+          openrouterModel: inputOpenRouterModel,
           ollamaUrl: inputOllamaUrl.trim(),
           ollamaModel: inputOllamaModel,
           language: inputLanguage,
@@ -218,8 +294,13 @@ export default function SettingsModal({
   };
 
   const handleRemove = async () => {
-    setInputKey("");
-    onSaveApiKey("");
+    if (inputProvider === "gemini") {
+      setInputKey("");
+      onSaveApiKey("");
+    } else if (inputProvider === "openrouter") {
+      setInputOpenRouterKey("");
+      onSaveOpenRouterApiKey("");
+    }
     setVerifyStatus(null);
   };
 
@@ -260,36 +341,55 @@ export default function SettingsModal({
               <Cpu className="w-3.5 h-3.5 text-[#88aaff]" />
               {t.aiProviderLabel}
             </label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {/* Google Gemini Card */}
               <button
                 type="button"
                 onClick={() => setInputProvider("gemini")}
-                className={`p-3.5 rounded-2xl border text-left flex items-center gap-3 transition-all cursor-pointer ${
+                className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
                   inputProvider === "gemini"
                     ? "bg-indigo-500/20 border-[#88aaff] text-white shadow-[0_0_15px_rgba(136,170,255,0.2)]"
                     : "bg-white/[0.02] border-white/10 text-white/60 hover:bg-white/[0.05]"
                 }`}
               >
-                <Sparkles className="w-5 h-5 text-[#88aaff]" />
+                <Sparkles className="w-4 h-4 text-[#88aaff] shrink-0" />
                 <div>
-                  <div className="text-xs font-bold">{t.geminiProvider}</div>
+                  <div className="text-xs font-bold">{t.geminiProvider || "Google Gemini"}</div>
                   <div className="text-[10px] text-white/40">API Key Google</div>
                 </div>
               </button>
 
+              {/* OpenRouter Card */}
               <button
                 type="button"
-                onClick={() => setInputProvider("ollama")}
-                className={`p-3.5 rounded-2xl border text-left flex items-center gap-3 transition-all cursor-pointer ${
-                  inputProvider === "ollama"
-                    ? "bg-indigo-500/20 border-[#88aaff] text-white shadow-[0_0_15px_rgba(136,170,255,0.2)]"
+                onClick={() => setInputProvider("openrouter")}
+                className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
+                  inputProvider === "openrouter"
+                    ? "bg-purple-500/20 border-purple-400 text-white shadow-[0_0_15px_rgba(192,132,252,0.2)]"
                     : "bg-white/[0.02] border-white/10 text-white/60 hover:bg-white/[0.05]"
                 }`}
               >
-                <Server className="w-5 h-5 text-emerald-400" />
+                <Layers className="w-4 h-4 text-purple-400 shrink-0" />
                 <div>
-                  <div className="text-xs font-bold">{t.ollamaProvider}</div>
-                  <div className="text-[10px] text-white/40">Localhost / Server</div>
+                  <div className="text-xs font-bold">{t.openrouterProvider || "OpenRouter"}</div>
+                  <div className="text-[10px] text-purple-300/60">Multi-modelo Áudio</div>
+                </div>
+              </button>
+
+              {/* Ollama Card */}
+              <button
+                type="button"
+                onClick={() => setInputProvider("ollama")}
+                className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
+                  inputProvider === "ollama"
+                    ? "bg-emerald-500/20 border-emerald-400 text-white shadow-[0_0_15px_rgba(52,211,153,0.2)]"
+                    : "bg-white/[0.02] border-white/10 text-white/60 hover:bg-white/[0.05]"
+                }`}
+              >
+                <Server className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div>
+                  <div className="text-xs font-bold">{t.ollamaProvider || "Ollama"}</div>
+                  <div className="text-[10px] text-emerald-300/60">Localhost / Server</div>
                 </div>
               </button>
             </div>
@@ -376,6 +476,119 @@ export default function SettingsModal({
             </>
           )}
 
+          {/* OpenRouter Settings View */}
+          {inputProvider === "openrouter" && (
+            <>
+              <div className="mb-6 p-4 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-xs text-white/70 leading-relaxed space-y-2">
+                <p>
+                  Requer uma <strong className="text-white">Chave API do OpenRouter</strong> para acessar diversos modelos com áudio.
+                </p>
+                <a
+                  href="https://openrouter.ai/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-purple-300 hover:underline font-semibold"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  {t.getOpenRouterKeyLink || "Obter chave API no OpenRouter.ai"}
+                </a>
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-xs font-semibold text-white/80 mb-2 uppercase tracking-wider">
+                  {t.openrouterKeyLabel || "Chave API OpenRouter"}
+                </label>
+                <div className="relative flex items-center">
+                  <input
+                    type={showORKey ? "text" : "password"}
+                    value={inputOpenRouterKey}
+                    onChange={(e) => {
+                      setInputOpenRouterKey(e.target.value);
+                      setVerifyStatus(null);
+                    }}
+                    placeholder={t.openrouterKeyPlaceholder || "sk-or-v1-..."}
+                    className="w-full px-4 py-3 pr-12 rounded-xl bg-black/50 border border-white/15 focus:border-purple-400 focus:ring-1 focus:ring-purple-400 text-sm text-white placeholder-white/30 outline-none transition-all font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowORKey(!showORKey)}
+                    className="absolute right-3 text-white/50 hover:text-white transition-colors p-1"
+                    title={showORKey ? "Ocultar chave" : "Mostrar chave"}
+                  >
+                    {showORKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-white/80 uppercase tracking-wider">
+                    {t.openrouterModelLabel || "Modelo OpenRouter"}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={fetchOpenRouterModels}
+                    disabled={isLoadingOpenRouterModels}
+                    className="text-[11px] text-purple-300 hover:text-purple-200 flex items-center gap-1 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLoadingOpenRouterModels ? "animate-spin" : ""}`} />
+                    <span>Atualizar lista</span>
+                  </button>
+                </div>
+
+                <div className="mb-3 px-3 py-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-[11px] text-purple-200 flex items-center gap-1.5 font-medium">
+                  <Volume2 className="w-3.5 h-3.5 text-purple-300 shrink-0" />
+                  <span>{t.audioOnlyFilterNotice || "Apenas modelos com suporte a entrada de áudio são exibidos"}</span>
+                </div>
+
+                {isLoadingOpenRouterModels ? (
+                  <div className="p-4 rounded-xl bg-black/40 border border-white/10 text-xs text-white/60 flex items-center justify-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-purple-400" />
+                    <span>Carregando modelos com suporte a áudio...</span>
+                  </div>
+                ) : openrouterModels.length > 0 ? (
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
+                    {openrouterModels.map((m) => (
+                      <label
+                        key={m.id}
+                        onClick={() => setInputOpenRouterModel(m.id)}
+                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                          inputOpenRouterModel === m.id
+                            ? "bg-purple-500/20 border-purple-400 text-white"
+                            : "bg-white/[0.02] border-white/10 hover:border-white/20"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="openrouter-model"
+                          value={m.id}
+                          checked={inputOpenRouterModel === m.id}
+                          onChange={() => setInputOpenRouterModel(m.id)}
+                          className="mt-1 accent-purple-400"
+                        />
+                        <div className="flex-1 text-xs">
+                          <div className="font-bold text-white">{m.name}</div>
+                          <div className="text-[10px] text-purple-300/80 font-mono mt-0.5">{m.id}</div>
+                          {m.description && (
+                            <p className="text-white/50 text-[11px] mt-1 leading-snug">{m.description}</p>
+                          )}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={inputOpenRouterModel}
+                    onChange={(e) => setInputOpenRouterModel(e.target.value)}
+                    placeholder="Ex: google/gemini-2.5-flash, openai/gpt-4o-audio-preview"
+                    className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/15 text-sm text-white font-mono outline-none focus:border-purple-400"
+                  />
+                )}
+              </div>
+            </>
+          )}
+
           {/* Ollama Settings View */}
           {inputProvider === "ollama" && (
             <>
@@ -390,13 +603,13 @@ export default function SettingsModal({
                       value={inputOllamaUrl}
                       onChange={(e) => setInputOllamaUrl(e.target.value)}
                       placeholder={t.ollamaUrlPlaceholder}
-                      className="flex-1 px-4 py-2.5 rounded-xl bg-black/50 border border-white/15 focus:border-[#88aaff] text-sm text-white font-mono outline-none"
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-black/50 border border-white/15 focus:border-emerald-400 text-sm text-white font-mono outline-none"
                     />
                     <button
                       type="button"
                       onClick={handleCheckOllama}
                       disabled={isCheckingOllama}
-                      className="px-4 py-2.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-[#88aaff] border border-indigo-500/30 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      className="px-4 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
                     >
                       {isCheckingOllama ? (
                         <>
@@ -412,7 +625,7 @@ export default function SettingsModal({
                     </button>
                   </div>
                   {ollamaCheckStatus && (
-                    <p className="text-xs text-indigo-300 mt-2 font-medium bg-indigo-500/10 p-2.5 rounded-lg border border-indigo-500/20">
+                    <p className="text-xs text-emerald-300 mt-2 font-medium bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/20">
                       {ollamaCheckStatus}
                     </p>
                   )}
@@ -422,11 +635,17 @@ export default function SettingsModal({
                   <label className="block text-xs font-semibold text-white/80 mb-2 uppercase tracking-wider">
                     {t.ollamaModelLabel}
                   </label>
+
+                  <div className="mb-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-200 flex items-center gap-1.5 font-medium">
+                    <Volume2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>{t.audioOnlyFilterNotice || "Apenas modelos com suporte a entrada de áudio são exibidos"}</span>
+                  </div>
+
                   {ollamaModels.length > 0 ? (
                     <select
                       value={inputOllamaModel}
                       onChange={(e) => setInputOllamaModel(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/15 text-sm text-white font-mono outline-none focus:border-[#88aaff]"
+                      className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/15 text-sm text-white font-mono outline-none focus:border-emerald-400"
                     >
                       {ollamaModels.map((m) => (
                         <option key={m.name} value={m.name} className="bg-zinc-900 text-white">
@@ -439,12 +658,12 @@ export default function SettingsModal({
                       type="text"
                       value={inputOllamaModel}
                       onChange={(e) => setInputOllamaModel(e.target.value)}
-                      placeholder="Ex: qwen2-audio, whisper, llama3.2-vision..."
-                      className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/15 text-sm text-white font-mono outline-none focus:border-[#88aaff]"
+                      placeholder="Ex: qwen2-audio, whisper, ultravox..."
+                      className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/15 text-sm text-white font-mono outline-none focus:border-emerald-400"
                     />
                   )}
                   <p className="text-[11px] text-white/40 mt-1.5">
-                    Selecione um modelo local pré-instalado do Ollama com suporte a áudio/multimodal.
+                    Selecione um modelo local do Ollama pré-instalado com suporte a áudio/multimodal.
                   </p>
                 </div>
               </div>
@@ -506,7 +725,7 @@ export default function SettingsModal({
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-white/10">
             <div className="flex gap-2">
-              {inputKey && inputProvider === "gemini" && (
+              {((inputKey && inputProvider === "gemini") || (inputOpenRouterKey && inputProvider === "openrouter")) && (
                 <button
                   type="button"
                   onClick={handleRemove}
@@ -519,7 +738,11 @@ export default function SettingsModal({
               <button
                 type="button"
                 onClick={handleTestKey}
-                disabled={isVerifying || (inputProvider === "gemini" && !inputKey.trim())}
+                disabled={
+                  isVerifying || 
+                  (inputProvider === "gemini" && !inputKey.trim()) ||
+                  (inputProvider === "openrouter" && !inputOpenRouterKey.trim())
+                }
                 className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 text-white/80 hover:text-white border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
               >
                 {isVerifying ? (

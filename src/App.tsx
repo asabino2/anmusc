@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { MusicAnalysis, DemoTrack } from "./types";
+import { MusicAnalysis, DemoTrack, AIProvider } from "./types";
 import { demoTracks } from "./data/demoTracks";
 import AnalysisResult from "./components/AnalysisResult";
 import MicListener from "./components/MicListener";
@@ -43,7 +43,7 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
 
   // Settings & i18n States
-  const [provider, setProvider] = useState<"gemini" | "ollama">(() => {
+  const [provider, setProvider] = useState<AIProvider>(() => {
     return (localStorage.getItem("ai_provider") as any) || "gemini";
   });
   const [apiKey, setApiKey] = useState<string>(() => {
@@ -52,6 +52,14 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     return localStorage.getItem("gemini_model") || "gemini-3.6-flash";
   });
+
+  const [openrouterApiKey, setOpenrouterApiKey] = useState<string>(() => {
+    return localStorage.getItem("openrouter_api_key") || "";
+  });
+  const [openrouterModel, setOpenrouterModel] = useState<string>(() => {
+    return localStorage.getItem("openrouter_model") || "google/gemini-2.5-flash";
+  });
+
   const [ollamaUrl, setOllamaUrl] = useState<string>(() => {
     return localStorage.getItem("ollama_url") || "http://localhost:11434";
   });
@@ -69,7 +77,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Save state helpers
-  const handleSaveProvider = (p: "gemini" | "ollama") => {
+  const handleSaveProvider = (p: AIProvider) => {
     setProvider(p);
     localStorage.setItem("ai_provider", p);
   };
@@ -83,6 +91,17 @@ export default function App() {
   const handleSaveModel = (model: string) => {
     setSelectedModel(model);
     localStorage.setItem("gemini_model", model);
+  };
+
+  const handleSaveOpenRouterApiKey = (newKey: string) => {
+    setOpenrouterApiKey(newKey);
+    if (newKey) localStorage.setItem("openrouter_api_key", newKey);
+    else localStorage.removeItem("openrouter_api_key");
+  };
+
+  const handleSaveOpenRouterModel = (model: string) => {
+    setOpenrouterModel(model);
+    localStorage.setItem("openrouter_model", model);
   };
 
   const handleSaveOllamaUrl = (url: string) => {
@@ -150,6 +169,11 @@ export default function App() {
       setIsSettingsOpen(true);
       return;
     }
+    if (provider === "openrouter" && (!openrouterApiKey || openrouterApiKey.trim() === "")) {
+      setError("Chave API do OpenRouter não configurada! Clique em Configurações para inserir a chave.");
+      setIsSettingsOpen(true);
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -157,12 +181,18 @@ export default function App() {
 
     try {
       const base64Data = await fileToBase64(file);
+      const currentSelectedModel = provider === "gemini" 
+        ? selectedModel 
+        : provider === "openrouter" 
+        ? openrouterModel 
+        : ollamaModel;
 
       const response = await fetch("/api/analyze-music", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-gemini-api-key": apiKey.trim(),
+          "x-openrouter-api-key": openrouterApiKey.trim(),
           "x-gemini-model": selectedModel,
           "x-app-language": language,
         },
@@ -171,7 +201,8 @@ export default function App() {
           mimeType: file.type,
           fileData: base64Data,
           provider,
-          selectedModel: provider === "gemini" ? selectedModel : ollamaModel,
+          selectedModel: currentSelectedModel,
+          apiKey: provider === "gemini" ? apiKey.trim() : provider === "openrouter" ? openrouterApiKey.trim() : "",
           ollamaUrl,
           language,
         }),
@@ -180,12 +211,22 @@ export default function App() {
       const data = await response.json();
       if (!response.ok) {
         if (response.status === 401) setIsSettingsOpen(true);
-        throw new Error(data.error || "Failed to analyze audio file.");
+        console.error("==================================================");
+        console.error("[MUSIC ANALYZER API RESPONSE ERROR]:", data);
+        console.error("HTTP Status:", response.status);
+        console.error("Error Message:", data.error);
+        if (data.details) console.error("Details:", data.details);
+        if (data.stack) console.error("Server Stack:\n", data.stack);
+        console.error("==================================================");
+        throw new Error(data.details ? `${data.error || "Falha na análise."} (Detalhes: ${data.details})` : (data.error || "Falha ao analisar o arquivo de áudio."));
       }
       setAnalysis(data);
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Could not analyze this audio. Check your settings.");
+      console.error("==================================================");
+      console.error("[MUSIC ANALYZER FRONTEND EXCEPTION DETAILED LOG]:", err);
+      if (err.stack) console.error("Client Stack:\n", err.stack);
+      console.error("==================================================");
+      setError(err.message || "Não foi possível analisar este áudio. Verifique suas configurações.");
     } finally {
       setIsLoading(false);
     }
@@ -194,6 +235,11 @@ export default function App() {
   const handleMicAudioCaptured = async (blob: Blob, base64Data: string, mimeType: string) => {
     if (provider === "gemini" && (!apiKey || apiKey.trim() === "")) {
       setError(t.noKeyWarning);
+      setIsSettingsOpen(true);
+      return;
+    }
+    if (provider === "openrouter" && (!openrouterApiKey || openrouterApiKey.trim() === "")) {
+      setError("Chave API do OpenRouter não configurada! Clique em Configurações para inserir a chave.");
       setIsSettingsOpen(true);
       return;
     }
@@ -208,11 +254,18 @@ export default function App() {
     setAnalysis(null);
 
     try {
+      const currentSelectedModel = provider === "gemini" 
+        ? selectedModel 
+        : provider === "openrouter" 
+        ? openrouterModel 
+        : ollamaModel;
+
       const response = await fetch("/api/analyze-music", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-gemini-api-key": apiKey.trim(),
+          "x-openrouter-api-key": openrouterApiKey.trim(),
           "x-gemini-model": selectedModel,
           "x-app-language": language,
         },
@@ -221,7 +274,8 @@ export default function App() {
           mimeType: mimeType || "audio/webm",
           fileData: base64Data,
           provider,
-          selectedModel: provider === "gemini" ? selectedModel : ollamaModel,
+          selectedModel: currentSelectedModel,
+          apiKey: provider === "gemini" ? apiKey.trim() : provider === "openrouter" ? openrouterApiKey.trim() : "",
           ollamaUrl,
           language,
         }),
@@ -230,12 +284,22 @@ export default function App() {
       const data = await response.json();
       if (!response.ok) {
         if (response.status === 401) setIsSettingsOpen(true);
-        throw new Error(data.error || "Failed to analyze mic recording.");
+        console.error("==================================================");
+        console.error("[MUSIC ANALYZER MIC API RESPONSE ERROR]:", data);
+        console.error("HTTP Status:", response.status);
+        console.error("Error Message:", data.error);
+        if (data.details) console.error("Details:", data.details);
+        if (data.stack) console.error("Server Stack:\n", data.stack);
+        console.error("==================================================");
+        throw new Error(data.details ? `${data.error || "Falha na gravação."} (Detalhes: ${data.details})` : (data.error || "Falha ao analisar a gravação do microfone."));
       }
       setAnalysis(data);
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Could not analyze recorded audio. Check settings.");
+      console.error("==================================================");
+      console.error("[MUSIC ANALYZER MIC FRONTEND EXCEPTION DETAILED LOG]:", err);
+      if (err.stack) console.error("Client Stack:\n", err.stack);
+      console.error("==================================================");
+      setError(err.message || "Não foi possível analisar o áudio gravado. Verifique suas configurações.");
     } finally {
       setIsLoading(false);
     }
@@ -272,7 +336,23 @@ export default function App() {
     });
   };
 
-  const isProviderConfigured = provider === "ollama" || Boolean(apiKey.trim());
+  const isProviderConfigured = 
+    (provider === "gemini" && Boolean(apiKey.trim())) ||
+    (provider === "openrouter" && Boolean(openrouterApiKey.trim())) ||
+    provider === "ollama";
+
+  const getProviderNameLabel = () => {
+    if (provider === "ollama") return "Ollama";
+    if (provider === "openrouter") return "OpenRouter";
+    return t.configured;
+  };
+
+  const activeModelDisplay = 
+    provider === "ollama"
+      ? `OLLAMA (${ollamaModel || "local"})`
+      : provider === "openrouter"
+      ? `OPENROUTER (${openrouterModel || "audio"})`
+      : selectedModel.replace(/-/g, " ");
 
   return (
     <div className="min-h-screen bg-[#050505] text-zinc-100 flex flex-col font-sans selection:bg-[#88aaff] selection:text-black relative overflow-x-hidden">
@@ -287,7 +367,7 @@ export default function App() {
               <div className="w-4 h-4 bg-black rounded-sm rotate-45"></div>
             </div>
             <h1 className="text-lg md:text-xl font-bold tracking-tighter italic text-white uppercase">
-              SUNO.AI ANALYZER
+              MUSIC ANALYZER
             </h1>
           </div>
 
@@ -305,7 +385,7 @@ export default function App() {
               {isProviderConfigured ? (
                 <span className="flex items-center gap-1.5 text-emerald-400 text-[11px] font-mono bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                   <ShieldCheck className="w-3 h-3" />
-                  <span>{provider === "ollama" ? "Ollama" : t.configured}</span>
+                  <span>{getProviderNameLabel()}</span>
                 </span>
               ) : (
                 <span className="flex items-center gap-1.5 text-amber-400 text-[11px] font-mono bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
@@ -335,7 +415,7 @@ export default function App() {
             className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.03] border border-white/[0.08] text-[#88aaff] text-xs font-mono tracking-wider mb-4 select-none uppercase"
           >
             <Sparkles className="w-3.5 h-3.5 text-[#88aaff]" />
-            {t.heroBadge} • {provider === "ollama" ? `OLLAMA (${ollamaModel || "local"})` : selectedModel.replace(/-/g, " ")}
+            {t.heroBadge} • {activeModelDisplay}
           </motion.div>
           
           <motion.h2
@@ -572,7 +652,7 @@ export default function App() {
 
       <footer className="w-full bg-black/40 border-t border-white/10 py-8 text-center text-xs text-white/40 mt-20 relative z-10">
         <p className="max-w-xl mx-auto px-6 leading-relaxed">
-          © 2026 SUNO.AI ANALYZER. Multi-language intelligent audio transcription & analysis.
+          © 2026 Music Analyzer. Multi-language intelligent audio transcription & analysis.
         </p>
       </footer>
 
@@ -586,6 +666,10 @@ export default function App() {
         onSaveApiKey={handleSaveApiKey}
         selectedModel={selectedModel}
         onSaveModel={handleSaveModel}
+        openrouterApiKey={openrouterApiKey}
+        onSaveOpenRouterApiKey={handleSaveOpenRouterApiKey}
+        openrouterModel={openrouterModel}
+        onSaveOpenRouterModel={handleSaveOpenRouterModel}
         ollamaUrl={ollamaUrl}
         onSaveOllamaUrl={handleSaveOllamaUrl}
         ollamaModel={ollamaModel}

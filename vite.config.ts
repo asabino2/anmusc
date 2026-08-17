@@ -13,7 +13,7 @@ export default defineConfig(() => {
     },
     server: {
       host: true, // Listen on all network interfaces (0.0.0.0)
-      allowedHosts: true, // Allow requests from any host (IP, custom domain, ngrok, cloudflare)
+      allowedHosts: true as any, // Allow requests from any host (IP, custom domain, ngrok, cloudflare)
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.

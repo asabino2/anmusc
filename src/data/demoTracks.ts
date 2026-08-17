@@ -85,6 +85,26 @@ Into the grid...
         { name: "The Perfect Girl by Mareux", similarity: 82 },
         { name: "Resonance by Home", similarity: 79 }
       ],
+      rating: {
+        overallScore: 8.8,
+        vocalsScore: 85,
+        rhythmScore: 92,
+        productionScore: 90,
+        compositionScore: 86,
+        strengths: [
+          "Timbre analógico autêntico e arpejos vibrantes dos anos 80",
+          "Excelente estabilidade de ritmo no andamento 115 BPM",
+          "Processamento de vocoder perfeitamente encaixado na atmosfera cyberpunk"
+        ],
+        improvements: [
+          "O baixo sintetizado poderia ter um sub-grave um pouco mais encorpado na transição da ponte",
+          "Adicionar pequenas variações no timbre do lead durante o 2º verso para evitar repetição"
+        ],
+        potentialIssues: [
+          "Compressão excessiva no solo de guitarra-sintetizador causando leve pico de agudo"
+        ],
+        feedback: "Faixa synthwave extremamente bem produzida, mantendo alta energia e apelo nostálgico. A afinação do vocoder é precisa e a seção rítmica conduz a música de forma contagiante."
+      },
       summary: "An exhilarating synthwave anthem characterized by pulsating analog basslines, nostalgic 80s drum-machine patterns, and heavily processed cybernetic vocals that evoke a driving sci-fi journey."
     }
   },
@@ -175,6 +195,26 @@ Just whispers...
         { name: "Like Real People Do by Hozier", similarity: 85 },
         { name: "The Night We Met by Lord Huron", similarity: 80 }
       ],
+      rating: {
+        overallScore: 9.1,
+        vocalsScore: 94,
+        rhythmScore: 88,
+        productionScore: 91,
+        compositionScore: 92,
+        strengths: [
+          "Interpretação vocal intimista e altamente emotiva da cantora Clara",
+          "Fingerpicking de violão acústico impecável com afinação limpa",
+          "Excelente uso do som ambiente de chuva integrando a ambiência da composição"
+        ],
+        improvements: [
+          "As cordas de apoio no refrão poderiam entrar com um fade-in um pouco mais gradual",
+          "Um toque sutil de reverb de sala no piano aumentaria a profundidade acústica"
+        ],
+        potentialIssues: [
+          "Leve ruído de fundo captado no início do solo de violão acústico"
+        ],
+        feedback: "Uma balada folk magnífica com entrega vocal transparente e sensível. A arranjagem orgânica valoriza a interpretação e transmite com perfeição a atmosfera melancólica."
+      },
       summary: "A touching and organic indie-folk ballad anchored by a warm, fingerpicked acoustic guitar and a beautifully fragile female lead vocal that captures a poignant sense of longing."
     }
   },
@@ -266,6 +306,27 @@ We are the rebels!
         { name: "Smells Like Teen Spirit by Nirvana", similarity: 82 },
         { name: "The Pretender by Foo Fighters", similarity: 80 }
       ],
+      rating: {
+        overallScore: 8.4,
+        vocalsScore: 82,
+        rhythmScore: 89,
+        productionScore: 84,
+        compositionScore: 82,
+        strengths: [
+          "Riffs explosivos de guitarra com excelente distorção e energia rock",
+          "Bateria com ataque potente de bumbo duplo e caixas nítidas",
+          "Vocal rasgado enérgico com grande atitude e presença de palco"
+        ],
+        improvements: [
+          "Equilibrar os agudos da guitarra solo na frequência de 4kHz a 6kHz",
+          "Dar um ganho adicional de 1.5dB no baixo com overdrive para preencher a base"
+        ],
+        potentialIssues: [
+          "Leve saturação/clipping na transição do scream durante a ponte",
+          "Instabilidade menor no tempo da virada de bateria antes do refrão final"
+        ],
+        feedback: "Um hard rock de alto impacto com instrumental visceral. A performance é cheia de garra, necessitando apenas de um pequeno ajuste de frequência na mixagem para evitar picos de distorção no vocal."
+      },
       summary: "A high-octane hard rock anthem featuring thunderous drums, explosive distorted guitar riffs, and a gritty, high-energy vocal delivery full of rebellious attitude."
     }
   }

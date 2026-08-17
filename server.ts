@@ -40,6 +40,40 @@ const LANGUAGE_NAMES: Record<string, string> = {
   fr: "French",
 };
 
+const DEFAULT_OPENROUTER_AUDIO_MODELS = [
+  {
+    id: "google/gemini-2.5-flash",
+    name: "Google: Gemini 2.5 Flash",
+    description: "Recomendado. Alta velocidade e excelente fidelidade em áudio.",
+  },
+  {
+    id: "google/gemini-flash-1.5",
+    name: "Google: Gemini Flash 1.5",
+    description: "Modelo otimizado e muito rápido com entrada de áudio.",
+  },
+  {
+    id: "google/gemini-2.5-pro",
+    name: "Google: Gemini 2.5 Pro",
+    description: "Máxima precisão e raciocínio analítico para áudio.",
+  },
+  {
+    id: "openai/gpt-4o-audio-preview",
+    name: "OpenAI: GPT-4o Audio Preview",
+    description: "Análise e transcrição direta de áudio com GPT-4o.",
+  },
+  {
+    id: "openai/gpt-4o-mini-audio-preview",
+    name: "OpenAI: GPT-4o Mini Audio Preview",
+    description: "Versão compacta e rápida com suporte a áudio.",
+  },
+  {
+    id: "qwen/qwen-2-audio-7b-instruct",
+    name: "Qwen: Qwen2 Audio 7B Instruct",
+    description: "Modelo open-weights especializado em áudio e música.",
+  },
+];
+
+
 const fetchiTunesSongDetails = async (query: string) => {
   try {
     const cleanQuery = query.replace(/\(.*?\)/g, "").trim();
@@ -50,6 +84,7 @@ const fetchiTunesSongDetails = async (query: string) => {
     if (data.results && data.results.length > 0) {
       const track = data.results[0];
       return {
+        officialSongName: track.trackName && track.artistName ? `${track.trackName} by ${track.artistName}` : null,
         albumCoverUrl: track.artworkUrl100 ? track.artworkUrl100.replace("100x100bb", "600x600bb") : null,
         albumName: track.collectionName || null,
         releaseYear: track.releaseDate ? track.releaseDate.substring(0, 4) : null,
@@ -60,6 +95,109 @@ const fetchiTunesSongDetails = async (query: string) => {
     console.warn("iTunes Search API error:", err);
   }
   return null;
+};
+
+const fetchStreamingLinksForSong = async (query: string) => {
+  try {
+    const cleanQuery = query.replace(/\(.*?\)/g, "").trim();
+    if (!cleanQuery || cleanQuery.length < 2) return null;
+
+    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(cleanQuery)}&entity=song&limit=1`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+
+    if (data.results && data.results.length > 0) {
+      const track = data.results[0];
+      const fullTrackTitle = `${track.trackName || ""} ${track.artistName || ""}`.toLowerCase();
+      const queryLower = cleanQuery.toLowerCase();
+
+      const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
+      const matchCount = queryWords.filter(word => fullTrackTitle.includes(word)).length;
+
+      if (queryWords.length === 0 || matchCount / Math.max(queryWords.length, 1) >= 0.4) {
+        const titleArtist = `${track.trackName} ${track.artistName}`;
+        return {
+          itunes: track.trackViewUrl || null,
+          spotify: `https://open.spotify.com/search/${encodeURIComponent(titleArtist)}`,
+          youtubeMusic: `https://music.youtube.com/search?q=${encodeURIComponent(titleArtist)}`,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn("Streaming links lookup error:", query, err);
+  }
+  return null;
+};
+
+const enrichAnalysisResult = async (result: any) => {
+  if (!result || typeof result !== "object") return result;
+
+  // Enrich main song iTunes details
+  if (result.songName) {
+    const itunesInfo = await fetchiTunesSongDetails(result.songName);
+    if (itunesInfo) {
+      if (itunesInfo.officialSongName && (result.songIdentificationType === "recognized" || !result.songName.includes(" by "))) {
+        result.songName = itunesInfo.officialSongName;
+        result.songIdentificationType = "recognized";
+      }
+      if (itunesInfo.albumCoverUrl) result.albumCoverUrl = itunesInfo.albumCoverUrl;
+      if (itunesInfo.albumName) result.albumName = itunesInfo.albumName;
+      if (itunesInfo.releaseYear) result.releaseYear = itunesInfo.releaseYear;
+      if (itunesInfo.artistName) result.artistName = itunesInfo.artistName;
+    }
+  }
+
+  // Enrich main song streaming links ONLY if recognized
+  if (result.songName && result.songIdentificationType === "recognized") {
+    const mainLinks = await fetchStreamingLinksForSong(result.songName);
+    if (mainLinks) {
+      result.streamingLinks = mainLinks;
+    }
+  }
+
+  // Enrich similar songs streaming links if verified on streaming platforms
+  if (Array.isArray(result.similarSongs)) {
+    result.similarSongs = await Promise.all(
+      result.similarSongs.map(async (song: any) => {
+        const songNameStr = typeof song === "string" ? song : song?.name;
+        const links = songNameStr ? await fetchStreamingLinksForSong(songNameStr) : null;
+        if (typeof song === "string") {
+          return {
+            name: song,
+            similarity: 80,
+            streamingLinks: links || undefined,
+          };
+        }
+        return {
+          ...song,
+          streamingLinks: links || undefined,
+        };
+      })
+    );
+  }
+
+  // Enrich singers photos
+  if (Array.isArray(result.singers)) {
+    result.singers = result.singers.map((singer: any) => {
+      if (typeof singer === "string") {
+        return {
+          name: singer,
+          gender: "Vocalista",
+          estimatedAge: "N/A",
+          estimatedNationality: "Global",
+          photoUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(singer)}&background=1e1b4b&color=88aaff&bold=true&size=256`,
+        };
+      }
+      const nameStr = singer.name || "Vocalista";
+      return {
+        ...singer,
+        photoUrl: singer.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(nameStr)}&background=1e1b4b&color=88aaff&bold=true&size=256`,
+      };
+    });
+  }
+
+  return result;
 };
 
 async function startServer() {
@@ -81,7 +219,47 @@ async function startServer() {
   app.use(express.json({ limit: "100mb" }));
   app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
-  // Endpoint to check Ollama server connection and list installed models
+  // Endpoint to fetch OpenRouter audio-capable models
+  app.get("/api/openrouter/models", async (req, res) => {
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/models");
+      if (!response.ok) {
+        throw new Error(`OpenRouter API respondeu com status HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      const allModels = data.data || [];
+
+      // Filter only models supporting audio input
+      const audioModels = allModels
+        .filter((m: any) => {
+          const inputModalities = m.architecture?.input_modalities || [];
+          const modality = m.architecture?.modality || "";
+          const id = m.id || "";
+          const name = m.name || "";
+          const description = m.description || "";
+
+          const hasAudioModality = inputModalities.includes("audio") || modality.includes("audio");
+          const isKnownAudioModel = /gemini-(2\.5|3\.|1\.5)|gpt-4o-audio|qwen2-audio|whisper|ultravox|speech|audio/i.test(
+            `${id} ${name} ${description}`
+          );
+
+          return hasAudioModality || isKnownAudioModel;
+        })
+        .map((m: any) => ({
+          id: m.id,
+          name: m.name || m.id,
+          description: m.description || "",
+        }));
+
+      const finalModels = audioModels.length > 0 ? audioModels : DEFAULT_OPENROUTER_AUDIO_MODELS;
+      return res.json({ ok: true, models: finalModels });
+    } catch (err: any) {
+      console.warn("Retornando lista padrão de modelos OpenRouter com áudio devido a erro de busca:", err.message);
+      return res.json({ ok: true, models: DEFAULT_OPENROUTER_AUDIO_MODELS });
+    }
+  });
+
+  // Endpoint to check Ollama server connection and list installed audio models
   app.post("/api/ollama/check", async (req, res) => {
     try {
       const ollamaUrl = (req.body?.ollamaUrl || "http://localhost:11434").replace(/\/$/, "");
@@ -100,16 +278,25 @@ async function startServer() {
       }
 
       const data = await response.json();
-      const models = (data.models || []).map((m: any) => ({
+      const rawModels = (data.models || []).map((m: any) => ({
         name: m.name,
         size: m.size,
         modified_at: m.modified_at,
       }));
 
+      // Filter only models with audio capabilities (e.g., qwen2-audio, whisper, ultravox, etc.)
+      const AUDIO_PATTERN = /audio|whisper|ultravox|sensevoice|speech|voxtelm|salmonn|listen/i;
+      const audioModels = rawModels.filter((m: any) => AUDIO_PATTERN.test(m.name));
+
+      const modelsToReturn = audioModels.length > 0 ? audioModels : rawModels;
+
       return res.json({
         ok: true,
-        message: `Servidor Ollama conectado com sucesso! (${models.length} modelos instalados encontrados)`,
-        models,
+        message: audioModels.length > 0
+          ? `Servidor Ollama conectado com sucesso! (${audioModels.length} modelo(s) com suporte a áudio encontrado(s))`
+          : `Servidor Ollama conectado. Exibindo modelos instalados (${rawModels.length} modelo(s)).`,
+        models: modelsToReturn,
+        filteredByAudio: audioModels.length > 0,
       });
     } catch (err: any) {
       return res.status(400).json({
@@ -134,6 +321,44 @@ async function startServer() {
           message: `Servidor Ollama e modelo (${model || "selecionado"}) prontos para uso!`,
           models: data.models || [],
         });
+      }
+
+      if (provider === "openrouter") {
+        const keyToTest = apiKey || (req.headers["x-openrouter-api-key"] as string);
+        const targetModel = model || "google/gemini-2.5-flash";
+
+        if (!keyToTest || keyToTest.trim() === "") {
+          return res.status(400).json({ valid: false, error: "Nenhuma chave API do OpenRouter fornecida." });
+        }
+
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${keyToTest.trim()}`,
+            "HTTP-Referer": "http://localhost:3000",
+            "X-Title": "Music Analyzer",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: targetModel,
+            messages: [{ role: "user", content: "Responda apenas: OK" }],
+          }),
+        });
+
+        if (!response.ok) {
+          const errText = await response.text().catch(() => "");
+          throw new Error(`OpenRouter retornou código HTTP ${response.status}: ${errText}`);
+        }
+
+        const data = await response.json();
+        if (data && data.choices && data.choices.length > 0) {
+          return res.json({
+            valid: true,
+            message: `Chave API do OpenRouter e modelo (${targetModel}) validados com sucesso!`,
+          });
+        } else {
+          return res.status(400).json({ valid: false, error: "Sem resposta válida da API OpenRouter." });
+        }
       }
 
       // Gemini check
@@ -225,7 +450,7 @@ async function startServer() {
         : fileData;
 
       const clientApiKey = (req.headers["x-gemini-api-key"] as string) || req.body?.apiKey;
-      const targetModel = (req.headers["x-gemini-model"] as string) || bodyModel || req.body?.model || "gemini-3.6-flash";
+      const targetModel = bodyModel || req.body?.selectedModel || req.body?.model || (req.headers["x-gemini-model"] as string) || "gemini-3.6-flash";
       const targetLang = (req.headers["x-app-language"] as string) || language || "en";
       const targetLangName = LANGUAGE_NAMES[targetLang] || "English";
 
@@ -240,7 +465,7 @@ CRITICAL TASK: SHAZAM-STYLE AMBIENT AUDIO IDENTIFICATION
 - Only if the audio is genuinely an original custom home demo or improvised recording should you set 'songIdentificationType' to 'estimate' and generate a fitting title.
 
 CRITICAL LANGUAGE INSTRUCTION:
-Output all textual descriptions, summary, singer profiles (name description, gender, estimated age, estimated nationality) and style tags in ${targetLangName.toUpperCase()} language.
+Output all textual descriptions, summary, singer profiles (name description, gender, estimated age, estimated nationality), style tags, rating strengths, improvements, potential issues, and feedback in ${targetLangName.toUpperCase()} language.
 
 Your task is to return a JSON object with:
 1. songName: Official song name and artist if recognized, or a creative estimated title.
@@ -252,10 +477,98 @@ Your task is to return a JSON object with:
 7. genres: Array of music genres.
 8. instruments: Array of objects with { name, percentage } where percentage is an integer between 1 and 100 representing the approximate mix presence of each detected musical instrument.
 9. tags: Array of descriptive instruments and production tags.
-10. similarSongs: Array of objects with { name, similarity } where similarity is an integer between 1 and 100.
-11. summary: A gorgeous 1-2 sentence summary of the musical analysis in ${targetLangName}.`;
+10. rating: Object evaluating the music:
+    - overallScore: Number from 0.0 to 10.0 representing overall musical quality score.
+    - vocalsScore: Integer 0 to 100 for vocal quality and pitch tuning.
+    - rhythmScore: Integer 0 to 100 for rhythm, timing, and tempo consistency.
+    - productionScore: Integer 0 to 100 for mix balance, clarity, and audio quality.
+    - compositionScore: Integer 0 to 100 for song structure and melody.
+    - strengths: Array of 2 to 4 positive key strengths of the track in ${targetLangName}.
+    - improvements: Array of 2 to 4 suggestions of what can be improved in ${targetLangName}.
+    - potentialIssues: Array of 1 to 3 detected issues or things that might be wrong (e.g. background noise, off-key singing, clipping, timing drift, harsh frequencies) in ${targetLangName}.
+    - feedback: A concise 2-3 sentence expert feedback paragraph in ${targetLangName}.
+11. similarSongs: Array of objects with { name, similarity } where similarity is an integer between 1 and 100.
+12. summary: A gorgeous 1-2 sentence summary of the musical analysis in ${targetLangName}.`;
 
-      if (provider === "ollama") {
+      if (provider === "openrouter") {
+        const openrouterKey = (req.headers["x-openrouter-api-key"] as string) || req.body?.apiKey || clientApiKey;
+        if (!openrouterKey || openrouterKey.trim() === "") {
+          return res.status(401).json({
+            error: "Chave API do OpenRouter ausente ou inválida.",
+            details: "Por favor, insira sua chave API do OpenRouter nas Configurações.",
+          });
+        }
+
+        const cleanMimeType = (mimeType || "audio/mp3").split(";")[0].trim();
+        let audioFormat = "mp3";
+        if (cleanMimeType.includes("wav")) audioFormat = "wav";
+        else if (cleanMimeType.includes("webm")) audioFormat = "webm";
+        else if (cleanMimeType.includes("m4a") || cleanMimeType.includes("mp4")) audioFormat = "m4a";
+        else if (cleanMimeType.includes("ogg")) audioFormat = "ogg";
+        else if (cleanMimeType.includes("flac")) audioFormat = "flac";
+
+        const targetModelToUse = targetModel || "google/gemini-2.5-flash";
+
+        const openrouterPayload = {
+          model: targetModelToUse,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: `${prompt}\n\nRespond strictly with valid raw JSON object conforming to the specification, with no markdown formatting or extra text wrappers.`
+                },
+                {
+                  type: "input_audio",
+                  input_audio: {
+                    data: cleanBase64,
+                    format: audioFormat
+                  }
+                }
+              ]
+            }
+          ],
+          response_format: { type: "json_object" }
+        };
+
+        let orRes;
+        try {
+          orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${openrouterKey.trim()}`,
+              "HTTP-Referer": "http://localhost:3000",
+              "X-Title": "Music Analyzer",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(openrouterPayload),
+          });
+        } catch (fetchErr: any) {
+          console.error("==================================================");
+          console.error("[OPENROUTER CONNECTION ERROR DETAILS]:", fetchErr.message || fetchErr);
+          console.error("==================================================");
+          throw new Error(`Falha de conexão com a API do OpenRouter: ${fetchErr.message || "Servidor inacessível"}`);
+        }
+
+        if (!orRes.ok) {
+          const rawErrText = await orRes.text().catch(() => "");
+          console.error("==================================================");
+          console.error("[OPENROUTER API RESPONSE ERROR DETAILS]:");
+          console.error("HTTP Status Code:", orRes.status);
+          console.error("Raw Error Body:\n", rawErrText);
+          console.error("==================================================");
+          throw new Error(`Erro na API do OpenRouter (HTTP ${orRes.status}): ${rawErrText || "Sem corpo de erro retornado."}`);
+        }
+
+        const orData = await orRes.json();
+        const rawText = orData.choices?.[0]?.message?.content || "";
+        const cleanedText = rawText.replace(/^```json/i, "").replace(/```$/, "").trim();
+        const result = JSON.parse(cleanedText);
+
+        const enriched = await enrichAnalysisResult(result);
+        return res.json(enriched);
+      } else if (provider === "ollama") {
         // Execute analysis via Ollama API
         const targetOllamaUrl = ollamaUrl.replace(/\/$/, "");
         const ollamaPayload = {
@@ -266,28 +579,50 @@ Your task is to return a JSON object with:
           format: "json",
         };
 
-        const ollamaRes = await fetch(`${targetOllamaUrl}/api/generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(ollamaPayload),
-        });
+        let ollamaRes;
+        try {
+          ollamaRes = await fetch(`${targetOllamaUrl}/api/generate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(ollamaPayload),
+          });
+        } catch (fetchErr: any) {
+          console.error("==================================================");
+          console.error("[OLLAMA CONNECTION ERROR DETAILS]:");
+          console.error("URL:", `${targetOllamaUrl}/api/generate`);
+          console.error("Model:", targetModel);
+          console.error("Message:", fetchErr.message || fetchErr);
+          if (fetchErr.stack) console.error("Stack Trace:\n", fetchErr.stack);
+          console.error("==================================================");
+          throw new Error(`Falha de conexão com o servidor Ollama (${targetOllamaUrl}): ${fetchErr.message || "Servidor inacessível"}`);
+        }
 
         if (!ollamaRes.ok) {
-          throw new Error(`Erro no servidor Ollama (${ollamaRes.status}): ${ollamaRes.statusText}`);
+          const rawErrText = await ollamaRes.text().catch(() => "");
+          console.error("==================================================");
+          console.error("[OLLAMA API RESPONSE ERROR DETAILS]:");
+          console.error("HTTP Status Code:", ollamaRes.status);
+          console.error("HTTP Status Text:", ollamaRes.statusText);
+          console.error("Target URL:", `${targetOllamaUrl}/api/generate`);
+          console.error("Raw Error Body:\n", rawErrText);
+          console.error("==================================================");
+          throw new Error(`Erro na API do Ollama (HTTP ${ollamaRes.status} ${ollamaRes.statusText}): ${rawErrText || "Sem corpo de erro retornado."}`);
         }
 
         const ollamaData = await ollamaRes.json();
         const responseText = ollamaData.response || ollamaData.text || "";
         const result = JSON.parse(responseText.trim());
-        return res.json(result);
+        const enriched = await enrichAnalysisResult(result);
+        return res.json(enriched);
       } else {
         // Execute analysis via Google Gemini API
         let ai;
         try {
           ai = getGeminiClient(clientApiKey);
         } catch (err: any) {
+          console.error("[GEMINI AUTH ERROR DETAILS]:", err.message);
           return res.status(401).json({
-            error: "Chave API do Gemini ausente.",
+            error: "Chave API do Gemini ausente ou inválida.",
             details: err.message,
           });
         }
@@ -301,108 +636,112 @@ Your task is to return a JSON object with:
           },
         };
 
-        const response = await ai.models.generateContent({
-          model: targetModel,
-          contents: [audioPart, prompt],
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                songName: { type: Type.STRING },
-                songIdentificationType: { type: Type.STRING, enum: ["recognized", "estimate"] },
-                lyrics: { type: Type.STRING },
-                bpm: { type: Type.INTEGER },
-                styles: { type: Type.ARRAY, items: { type: Type.STRING } },
-                singers: {
-                  type: Type.ARRAY,
-                  items: {
+        let response;
+        try {
+          response = await ai.models.generateContent({
+            model: targetModel,
+            contents: [audioPart, prompt],
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  songName: { type: Type.STRING },
+                  songIdentificationType: { type: Type.STRING, enum: ["recognized", "estimate"] },
+                  lyrics: { type: Type.STRING },
+                  bpm: { type: Type.INTEGER },
+                  styles: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  singers: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        name: { type: Type.STRING },
+                        gender: { type: Type.STRING },
+                        estimatedAge: { type: Type.STRING },
+                        estimatedNationality: { type: Type.STRING },
+                      },
+                      required: ["name", "gender", "estimatedAge", "estimatedNationality"]
+                    }
+                  },
+                  genres: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  instruments: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        name: { type: Type.STRING },
+                        percentage: { type: Type.INTEGER }
+                      },
+                      required: ["name", "percentage"]
+                    }
+                  },
+                  tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  rating: {
                     type: Type.OBJECT,
                     properties: {
-                      name: { type: Type.STRING },
-                      gender: { type: Type.STRING },
-                      estimatedAge: { type: Type.STRING },
-                      estimatedNationality: { type: Type.STRING },
+                      overallScore: { type: Type.NUMBER },
+                      vocalsScore: { type: Type.INTEGER },
+                      rhythmScore: { type: Type.INTEGER },
+                      productionScore: { type: Type.INTEGER },
+                      compositionScore: { type: Type.INTEGER },
+                      strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      improvements: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      potentialIssues: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      feedback: { type: Type.STRING },
                     },
-                    required: ["name", "gender", "estimatedAge", "estimatedNationality"]
-                  }
+                    required: ["overallScore", "vocalsScore", "rhythmScore", "productionScore", "compositionScore", "strengths", "improvements", "potentialIssues", "feedback"]
+                  },
+                  similarSongs: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        name: { type: Type.STRING },
+                        similarity: { type: Type.INTEGER }
+                      },
+                      required: ["name", "similarity"]
+                    }
+                  },
+                  summary: { type: Type.STRING }
                 },
-                genres: { type: Type.ARRAY, items: { type: Type.STRING } },
-                instruments: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      name: { type: Type.STRING },
-                      percentage: { type: Type.INTEGER }
-                    },
-                    required: ["name", "percentage"]
-                  }
-                },
-                tags: { type: Type.ARRAY, items: { type: Type.STRING } },
-                similarSongs: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      name: { type: Type.STRING },
-                      similarity: { type: Type.INTEGER }
-                    },
-                    required: ["name", "similarity"]
-                  }
-                },
-                summary: { type: Type.STRING }
-              },
-              required: ["songName", "songIdentificationType", "lyrics", "bpm", "styles", "singers", "genres", "instruments", "tags", "similarSongs", "summary"]
+                required: ["songName", "songIdentificationType", "lyrics", "bpm", "styles", "singers", "genres", "instruments", "tags", "rating", "similarSongs", "summary"]
+              }
             }
-          }
-        });
+          });
+        } catch (geminiApiErr: any) {
+          console.error("==================================================");
+          console.error("[GEMINI API CALL ERROR DETAILS]:");
+          console.error("Target Model:", targetModel);
+          console.error("Error Message:", geminiApiErr.message || geminiApiErr);
+          console.error("Status / Code:", geminiApiErr.status || geminiApiErr.code || "N/A");
+          if (geminiApiErr.stack) console.error("Stack Trace:\n", geminiApiErr.stack);
+          try {
+            console.error("Full Serialized Error:\n", JSON.stringify(geminiApiErr, Object.getOwnPropertyNames(geminiApiErr), 2));
+          } catch (_) {}
+          console.error("==================================================");
+          throw geminiApiErr;
+        }
 
         const responseText = response.text;
         if (!responseText) throw new Error("Resposta vazia recebida do Gemini.");
         const result = JSON.parse(responseText.trim());
 
-        // Enrich result with official iTunes cover art & singer photos
-        if (result.songName) {
-          const itunesInfo = await fetchiTunesSongDetails(result.songName);
-          if (itunesInfo) {
-            if (itunesInfo.officialSongName && (result.songIdentificationType === "recognized" || !result.songName.includes(" by "))) {
-              result.songName = itunesInfo.officialSongName;
-              result.songIdentificationType = "recognized";
-            }
-            if (itunesInfo.albumCoverUrl) result.albumCoverUrl = itunesInfo.albumCoverUrl;
-            if (itunesInfo.albumName) result.albumName = itunesInfo.albumName;
-            if (itunesInfo.releaseYear) result.releaseYear = itunesInfo.releaseYear;
-            if (itunesInfo.artistName) result.artistName = itunesInfo.artistName;
-          }
-        }
-
-        if (Array.isArray(result.singers)) {
-          result.singers = result.singers.map((singer: any) => {
-            if (typeof singer === "string") {
-              return {
-                name: singer,
-                gender: "Vocalista",
-                estimatedAge: "N/A",
-                estimatedNationality: "Global",
-                photoUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(singer)}&background=1e1b4b&color=88aaff&bold=true&size=256`,
-              };
-            }
-            const nameStr = singer.name || "Vocalista";
-            return {
-              ...singer,
-              photoUrl: singer.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(nameStr)}&background=1e1b4b&color=88aaff&bold=true&size=256`,
-            };
-          });
-        }
-
-        return res.json(result);
+        const enriched = await enrichAnalysisResult(result);
+        return res.json(enriched);
       }
     } catch (error: any) {
-      console.error("Analysis Error:", error);
+      console.error("==================================================");
+      console.error("[MUSIC ANALYZER API SERVER ERROR CATCH]:");
+      console.error("Error Message:", error.message || error);
+      console.error("Provider:", req.body?.provider || "gemini");
+      console.error("Model:", req.body?.selectedModel || req.headers["x-gemini-model"]);
+      if (error.stack) console.error("Stack Trace:\n", error.stack);
+      console.error("==================================================");
       return res.status(500).json({
         error: "Falha ao analisar o arquivo de áudio.",
-        details: error.message || error
+        details: error.message || String(error),
+        stack: error.stack || null,
       });
     }
   });
